@@ -34,6 +34,7 @@ enum FileProcessingStatus: String, CaseIterable, Hashable {
 struct FileItem: Identifiable, Hashable {
     let id: UUID
     var displayName: String
+    var sourceURL: URL?
     var kind: FileKind
     var status: FileProcessingStatus
     var pages: [PageItem]
@@ -41,12 +42,14 @@ struct FileItem: Identifiable, Hashable {
     init(
         id: UUID = UUID(),
         displayName: String,
+        sourceURL: URL? = nil,
         kind: FileKind,
         status: FileProcessingStatus,
         pages: [PageItem] = []
     ) {
         self.id = id
         self.displayName = displayName
+        self.sourceURL = sourceURL
         self.kind = kind
         self.status = status
         self.pages = pages

@@ -75,8 +75,8 @@ enum L10n {
     }
 
     enum Common {
-        static func supportedLaterTypes(_ types: String) -> String {
-            L10n.formatted("common.supported_later_types", default: "Supported later: %@", types)
+        static func supportedFormats(_ types: String) -> String {
+            L10n.formatted("common.supported_formats", default: "Supported: %@", types)
         }
 
         static func pageTitle(_ pageNumber: Int) -> String {
@@ -118,22 +118,45 @@ enum L10n {
 
     enum Import {
         static let title = L10n.string("import.title", default: "Import Page")
-        static let description = L10n.string("import.description", default: "This phase only prepares the shell. File selection, OCR, and export remain intentionally unimplemented.")
-        static let placeholderTitle = L10n.string("import.card.title", default: "Import Placeholder")
-        static let localFirst = L10n.string("import.local_first", default: "Local-first workflow")
-        static let noBackground = L10n.string("import.no_background", default: "No background processing yet")
+        static let description = L10n.string("import.description", default: "Choose local PDF or image files to load them into the current session. OCR, barcode detection, and export remain unimplemented.")
+        static let actionTitle = L10n.string("import.card.title", default: "Import Files")
+        static let localFirst = L10n.string("import.local_first", default: "Local-only session")
+        static let noBackground = L10n.string("import.no_background", default: "Metadata import only. No OCR, barcode scan, or export yet")
         static let chooseFiles = L10n.string("import.choose_files", default: "Choose Files")
-        static let sessionSeedTitle = L10n.string("import.card.session_seed_title", default: "Session Seed Data")
-        static let sessionSeedSubtitle = L10n.string("import.card.session_seed_subtitle", default: "Sample in-memory items keep the review and export shells visible.")
+        static let goToReview = L10n.string("import.go_to_review", default: "Go to Review / Edit")
+        static let importedFilesTitle = L10n.string("import.card.session_seed_title", default: "Imported Files")
+        static let importedFilesSessionSummary = L10n.string("import.summary.session_only", default: "Imported files remain in memory for the current session only.")
+        static let emptyImportedFiles = L10n.string("import.summary.empty", default: "No files imported yet.")
+        static let panelTitle = L10n.string("import.panel.title", default: "Import Files")
+        static let panelMessage = L10n.string("import.panel.message", default: "Choose one or more PDF or image files to load into this session.")
+
+        static func importedFilesSummary(fileCount: Int, pageCount: Int) -> String {
+            L10n.formatted(
+                "import.summary.counts",
+                default: "%1$@ file(s) • %2$@ total page(s)",
+                L10n.countText(fileCount),
+                L10n.countText(pageCount)
+            )
+        }
+
+        static func importErrorUnreadableFile(_ fileName: String) -> String {
+            L10n.formatted("import.error.unreadable_file", default: "Could not import \"%@\".", fileName)
+        }
+
+        static func importErrorEmptyPDF(_ fileName: String) -> String {
+            L10n.formatted("import.error.empty_pdf", default: "\"%@\" has no readable pages.", fileName)
+        }
     }
 
     enum Review {
         static let filesTitle = L10n.string("review.sidebar.files_title", default: "Files")
-        static let filesSubtitle = L10n.string("review.sidebar.files_subtitle", default: "Left sidebar placeholder for imported documents.")
+        static let filesSubtitle = L10n.string("review.sidebar.files_subtitle", default: "Imported documents in the current session.")
+        static let noImportedFiles = L10n.string("review.sidebar.no_files", default: "No files imported yet.")
         static let pagesTitle = L10n.string("review.sidebar.pages_title", default: "Pages")
-        static let pagesSubtitle = L10n.string("review.sidebar.pages_subtitle", default: "Page and status placeholders for the selected file.")
+        static let pagesSubtitle = L10n.string("review.sidebar.pages_subtitle", default: "Pages discovered from the selected file.")
+        static let noPagesAvailable = L10n.string("review.sidebar.no_pages", default: "Select a file to view its pages.")
         static let canvasSectionTitle = L10n.string("review.canvas.title", default: "Canvas")
-        static let canvasSubtitle = L10n.string("review.canvas.subtitle", default: "Center canvas placeholder for future PDF or image rendering.")
+        static let canvasSubtitle = L10n.string("review.canvas.subtitle", default: "Canvas rendering is still a placeholder. Selected file and page metadata are shown below.")
         static let canvasPreviewPlaceholder = L10n.string("review.canvas.preview_placeholder", default: "Page preview will render here in a later phase.")
         static let noFileSelected = L10n.string("review.canvas.no_file", default: "No file selected")
         static let noPageSelected = L10n.string("review.canvas.no_page", default: "No page selected")
@@ -157,7 +180,7 @@ enum L10n {
     }
 
     enum Services {
-        static let fileImportPlaceholder = L10n.string("service.file_import.placeholder", default: "Real file picking is intentionally deferred in this phase.")
+        static let fileImportGuidance = L10n.string("service.file_import.guidance", default: "Choose local PDF or image files. They remain in memory for this session only.")
         static let emptyCanvasTitle = L10n.string("service.pdf.canvas_title_empty", default: "Canvas Placeholder")
         static let ocrSummary = L10n.string("service.ocr.summary", default: "OCR is not implemented in the current phase.")
         static let barcodeSummary = L10n.string("service.barcode.summary", default: "Barcode and QR detection are placeholder-only for now.")

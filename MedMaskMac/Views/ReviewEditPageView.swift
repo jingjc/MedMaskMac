@@ -23,30 +23,35 @@ struct ReviewEditPageView: View {
                     title: L10n.Review.filesTitle,
                     subtitle: L10n.Review.filesSubtitle
                 ) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(viewModel.files) { file in
-                            Button {
-                                viewModel.selectFile(file.id)
-                            } label: {
-                                HStack(alignment: .top) {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(file.displayName)
-                                            .font(.headline)
-                                            .multilineTextAlignment(.leading)
-                                        Text(viewModel.fileSummary(for: file))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
+                    if viewModel.files.isEmpty {
+                        Text(L10n.Review.noImportedFiles)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(viewModel.files) { file in
+                                Button {
+                                    viewModel.selectFile(file.id)
+                                } label: {
+                                    HStack(alignment: .top) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(file.displayName)
+                                                .font(.headline)
+                                                .multilineTextAlignment(.leading)
+                                            Text(viewModel.fileSummary(for: file))
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
 
-                                    Spacer()
-                                    StatusBadge(text: file.status.displayTitle)
+                                        Spacer()
+                                        StatusBadge(text: file.status.displayTitle)
+                                    }
+                                    .padding(12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(file.id == viewModel.selectedFileID ? Color.accentColor.opacity(0.10) : Color.clear)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 }
-                                .padding(12)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(file.id == viewModel.selectedFileID ? Color.accentColor.opacity(0.10) : Color.clear)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -55,30 +60,35 @@ struct ReviewEditPageView: View {
                     title: L10n.Review.pagesTitle,
                     subtitle: L10n.Review.pagesSubtitle
                 ) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(viewModel.selectedFile?.pages ?? []) { page in
-                            Button {
-                                viewModel.selectPage(page.id)
-                            } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(page.title)
-                                            .font(.headline)
-                                        Text(viewModel.pageSummary(for: page))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
+                    if let pages = viewModel.selectedFile?.pages, !pages.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(pages) { page in
+                                Button {
+                                    viewModel.selectPage(page.id)
+                                } label: {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(page.title)
+                                                .font(.headline)
+                                            Text(viewModel.pageSummary(for: page))
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
 
-                                    Spacer()
-                                    StatusBadge(text: page.status.displayTitle)
+                                        Spacer()
+                                        StatusBadge(text: page.status.displayTitle)
+                                    }
+                                    .padding(12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(page.id == viewModel.selectedPageID ? Color.accentColor.opacity(0.10) : Color.clear)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 }
-                                .padding(12)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(page.id == viewModel.selectedPageID ? Color.accentColor.opacity(0.10) : Color.clear)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
+                    } else {
+                        Text(L10n.Review.noPagesAvailable)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -115,6 +125,17 @@ struct ReviewEditPageView: View {
                         Label(viewModel.selectedPageDisplayLabel, systemImage: "doc.plaintext")
                     }
                     .foregroundStyle(.secondary)
+
+                    if let selectedFileMetadataSummary = viewModel.selectedFileMetadataSummary,
+                       let selectedPageStatusSummary = viewModel.selectedPageStatusSummary {
+                        HStack {
+                            Text(selectedFileMetadataSummary)
+                            Spacer()
+                            Text(selectedPageStatusSummary)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
                 }
             }
 

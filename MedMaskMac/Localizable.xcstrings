@@ -154,6 +154,23 @@
         }
       }
     },
+    "common.supported_formats" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supported: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "支持格式：%@"
+          }
+        }
+      }
+    },
     "common.supported_later_types" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -449,13 +466,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sample in-memory items keep the review and export shells visible."
+            "value" : "Imported files remain in memory for the current session only."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用内存中的示例项目来保持审核和导出页面可见。"
+            "value" : "导入的文件仅保留在当前会话内存中。"
           }
         }
       }
@@ -466,13 +483,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Session Seed Data"
+            "value" : "Imported Files"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "会话示例数据"
+            "value" : "已导入文件"
           }
         }
       }
@@ -483,13 +500,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Import Placeholder"
+            "value" : "Import Files"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "导入占位"
+            "value" : "导入文件"
           }
         }
       }
@@ -511,19 +528,70 @@
         }
       }
     },
+    "import.error.empty_pdf" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\"%@\" has no readable pages."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\"%@\" 没有可读取的页面。"
+          }
+        }
+      }
+    },
+    "import.error.unreadable_file" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not import \"%@\"."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法导入 \"%@\"。"
+          }
+        }
+      }
+    },
+    "import.go_to_review" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Go to Review / Edit"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前往审核 / 编辑"
+          }
+        }
+      }
+    },
     "import.description" : {
       "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This phase only prepares the shell. File selection, OCR, and export remain intentionally unimplemented."
+            "value" : "Choose local PDF or image files to load them into the current session. OCR, barcode detection, and export remain unimplemented."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "当前阶段仅搭建壳层。文件选择、OCR 和导出功能均暂不实现。"
+            "value" : "选择本地 PDF 或图像文件并加载到当前会话中。OCR、条码检测和导出仍未实现。"
           }
         }
       }
@@ -534,13 +602,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Local-first workflow"
+            "value" : "Local-only session"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "本地优先工作流"
+            "value" : "仅本地会话"
           }
         }
       }
@@ -551,13 +619,98 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No background processing yet"
+            "value" : "Metadata import only. No OCR, barcode scan, or export yet"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "暂无后台处理"
+            "value" : "当前仅导入元数据。尚无 OCR、条码扫描或导出。"
+          }
+        }
+      }
+    },
+    "import.panel.message" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose one or more PDF or image files to load into this session."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择一个或多个 PDF 或图像文件并加载到当前会话。"
+          }
+        }
+      }
+    },
+    "import.panel.title" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import Files"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入文件"
+          }
+        }
+      }
+    },
+    "import.summary.counts" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ file(s) • %2$@ total page(s)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 个文件 • 共 %2$@ 页"
+          }
+        }
+      }
+    },
+    "import.summary.empty" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No files imported yet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未导入任何文件。"
+          }
+        }
+      }
+    },
+    "import.summary.session_only" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Imported files remain in memory for the current session only."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入的文件仅保留在当前会话内存中。"
           }
         }
       }
@@ -891,13 +1044,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Center canvas placeholder for future PDF or image rendering."
+            "value" : "Canvas rendering is still a placeholder. Selected file and page metadata are shown below."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "中央画布区域，用于后续 PDF 或图像渲染占位。"
+            "value" : "画布渲染仍为占位。下方会显示所选文件和页面的元数据。"
           }
         }
       }
@@ -1010,13 +1163,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Left sidebar placeholder for imported documents."
+            "value" : "Imported documents in the current session."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "左侧边栏用于已导入文档的占位显示。"
+            "value" : "当前会话中已导入的文档。"
           }
         }
       }
@@ -1038,19 +1191,53 @@
         }
       }
     },
+    "review.sidebar.no_files" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No files imported yet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未导入任何文件。"
+          }
+        }
+      }
+    },
+    "review.sidebar.no_pages" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select a file to view its pages."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择一个文件以查看其页面。"
+          }
+        }
+      }
+    },
     "review.sidebar.pages_subtitle" : {
       "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Page and status placeholders for the selected file."
+            "value" : "Pages discovered from the selected file."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "用于所选文件的页面和状态占位显示。"
+            "value" : "从所选文件中发现的页面。"
           }
         }
       }
@@ -1119,6 +1306,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "当前阶段刻意暂不实现真实文件选择。"
+          }
+        }
+      }
+    },
+    "service.file_import.guidance" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose local PDF or image files. They remain in memory for this session only."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择本地 PDF 或图像文件。它们仅保留在当前会话内存中。"
           }
         }
       }
