@@ -6,31 +6,31 @@ struct ImportPageView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text("Import Page")
+                Text(L10n.Import.title)
                     .font(.largeTitle.weight(.semibold))
 
-                Text("This phase only prepares the shell. File selection, OCR, and export remain intentionally unimplemented.")
+                Text(L10n.Import.description)
                     .font(.body)
                     .foregroundStyle(.secondary)
 
                 HStack(alignment: .top, spacing: 20) {
                     PanelCard(
-                        title: "Import Placeholder",
+                        title: L10n.Import.placeholderTitle,
                         subtitle: viewModel.importPlaceholderMessage
                     ) {
                         VStack(alignment: .leading, spacing: 12) {
-                            Label("Supported later: \(viewModel.supportedImportTypes)", systemImage: "doc.badge.plus")
-                            Label("Local-first workflow", systemImage: "desktopcomputer")
-                            Label("No background processing yet", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                            Label(L10n.Common.supportedLaterTypes(viewModel.supportedImportTypes), systemImage: "doc.badge.plus")
+                            Label(L10n.Import.localFirst, systemImage: "desktopcomputer")
+                            Label(L10n.Import.noBackground, systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90")
 
-                            Button("Choose Files") {}
+                            Button(L10n.Import.chooseFiles) {}
                                 .disabled(true)
                         }
                     }
 
                     PanelCard(
-                        title: "Session Seed Data",
-                        subtitle: "Sample in-memory items keep the review and export shells visible."
+                        title: L10n.Import.sessionSeedTitle,
+                        subtitle: L10n.Import.sessionSeedSubtitle
                     ) {
                         VStack(alignment: .leading, spacing: 10) {
                             ForEach(viewModel.files) { file in
@@ -38,12 +38,12 @@ struct ImportPageView: View {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(file.displayName)
                                             .font(.headline)
-                                        Text("\(file.kind.rawValue) • \(file.pageCount) page(s)")
+                                        Text(viewModel.fileSummary(for: file))
                                             .foregroundStyle(.secondary)
                                     }
 
                                     Spacer()
-                                    StatusBadge(text: file.status.rawValue)
+                                    StatusBadge(text: file.status.displayTitle)
                                 }
                             }
                         }

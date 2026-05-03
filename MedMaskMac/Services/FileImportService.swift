@@ -11,6 +11,6 @@ struct PlaceholderFileImportService: FileImportService {
     }
 
     func placeholderMessage() -> String {
-        "Real file picking is intentionally deferred in this phase."
+        L10n.Services.fileImportPlaceholder
     }
 }

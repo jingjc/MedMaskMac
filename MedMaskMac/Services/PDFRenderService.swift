@@ -7,9 +7,9 @@ protocol PDFRenderService {
 struct PlaceholderPDFRenderService: PDFRenderService {
     func canvasTitle(for page: PageItem?) -> String {
         if let page {
-            return "\(page.title) Canvas Placeholder"
+            return L10n.Services.canvasTitle(for: page.title)
         }
 
-        return "Canvas Placeholder"
+        return L10n.Services.emptyCanvasTitle
     }
 }

@@ -16,7 +16,7 @@ struct MedMaskRootView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 20) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("MedMask Mac")
+                Text(L10n.App.title)
                     .font(.title2.weight(.semibold))
                 Text(viewModel.selectedPage.subtitle)
                     .font(.subheadline)
@@ -25,7 +25,7 @@ struct MedMaskRootView: View {
 
             Spacer()
 
-            Picker("Page", selection: $viewModel.selectedPage) {
+            Picker(L10n.App.pagePickerLabel, selection: $viewModel.selectedPage) {
                 ForEach(AppPage.allCases) { page in
                     Text(page.title).tag(page)
                 }

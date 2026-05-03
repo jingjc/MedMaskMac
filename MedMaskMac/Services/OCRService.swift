@@ -5,5 +5,5 @@ protocol OCRService {
 }
 
 struct PlaceholderOCRService: OCRService {
-    let availabilitySummary = "OCR is not implemented in the current phase."
+    let availabilitySummary = L10n.Services.ocrSummary
 }

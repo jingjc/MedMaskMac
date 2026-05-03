@@ -20,8 +20,8 @@ struct ReviewEditPageView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 PanelCard(
-                    title: "Files",
-                    subtitle: "Left sidebar placeholder for imported documents."
+                    title: L10n.Review.filesTitle,
+                    subtitle: L10n.Review.filesSubtitle
                 ) {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(viewModel.files) { file in
@@ -33,13 +33,13 @@ struct ReviewEditPageView: View {
                                         Text(file.displayName)
                                             .font(.headline)
                                             .multilineTextAlignment(.leading)
-                                        Text("\(file.kind.rawValue) • \(file.pageCount) page(s)")
+                                        Text(viewModel.fileSummary(for: file))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
 
                                     Spacer()
-                                    StatusBadge(text: file.status.rawValue)
+                                    StatusBadge(text: file.status.displayTitle)
                                 }
                                 .padding(12)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -52,8 +52,8 @@ struct ReviewEditPageView: View {
                 }
 
                 PanelCard(
-                    title: "Pages",
-                    subtitle: "Page and status placeholders for the selected file."
+                    title: L10n.Review.pagesTitle,
+                    subtitle: L10n.Review.pagesSubtitle
                 ) {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(viewModel.selectedFile?.pages ?? []) { page in
@@ -64,13 +64,13 @@ struct ReviewEditPageView: View {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(page.title)
                                             .font(.headline)
-                                        Text("\(page.sensitiveRegions.count) region(s)")
+                                        Text(viewModel.pageSummary(for: page))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
 
                                     Spacer()
-                                    StatusBadge(text: page.status.rawValue)
+                                    StatusBadge(text: page.status.displayTitle)
                                 }
                                 .padding(12)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -88,12 +88,12 @@ struct ReviewEditPageView: View {
 
     private var canvas: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Canvas")
+            Text(L10n.Review.canvasSectionTitle)
                 .font(.title2.weight(.semibold))
 
             PanelCard(
                 title: viewModel.canvasTitle,
-                subtitle: "Center canvas placeholder for future PDF or image rendering."
+                subtitle: L10n.Review.canvasSubtitle
             ) {
                 VStack(spacing: 18) {
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -103,16 +103,16 @@ struct ReviewEditPageView: View {
                                 Image(systemName: "doc.viewfinder")
                                     .font(.system(size: 42))
                                     .foregroundStyle(.secondary)
-                                Text("Page preview will render here in a later phase.")
+                                Text(L10n.Review.canvasPreviewPlaceholder)
                                     .foregroundStyle(.secondary)
                             }
                         }
                         .frame(maxWidth: .infinity, minHeight: 480)
 
                     HStack {
-                        Label(viewModel.selectedFile?.displayName ?? "No file selected", systemImage: "doc.text")
+                        Label(viewModel.selectedFileDisplayLabel, systemImage: "doc.text")
                         Spacer()
-                        Label(viewModel.selectedDocumentPage?.title ?? "No page selected", systemImage: "doc.plaintext")
+                        Label(viewModel.selectedPageDisplayLabel, systemImage: "doc.plaintext")
                     }
                     .foregroundStyle(.secondary)
                 }
@@ -127,14 +127,14 @@ struct ReviewEditPageView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 PanelCard(
-                    title: "Inspector",
-                    subtitle: "Right-side placeholder for mask settings and page details."
+                    title: L10n.Review.inspectorTitle,
+                    subtitle: L10n.Review.inspectorSubtitle
                 ) {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("Mask Preset")
+                        Text(L10n.Review.maskPreset)
                             .font(.headline)
 
-                        Picker("Mask Preset", selection: $viewModel.selectedPreset) {
+                        Picker(L10n.Review.maskPreset, selection: $viewModel.selectedPreset) {
                             ForEach(MaskPreset.allCases) { preset in
                                 Text(preset.title).tag(preset)
                             }
@@ -146,15 +146,15 @@ struct ReviewEditPageView: View {
 
                         Divider()
 
-                        Label("Selected file regions: \(viewModel.selectedFileRegionCount)", systemImage: "square.dashed")
-                        Label("Total session regions: \(viewModel.totalRegionCount)", systemImage: "square.stack.3d.down.right")
+                        Label(viewModel.selectedFileRegionsSummary, systemImage: "square.dashed")
+                        Label(viewModel.totalSessionRegionsSummary, systemImage: "square.stack.3d.down.right")
                         Label(viewModel.maskPreviewSummary, systemImage: "rectangle.and.pencil.and.ellipsis")
                     }
                 }
 
                 PanelCard(
-                    title: "Detection Status",
-                    subtitle: "Service placeholders only. No OCR or barcode pass runs yet."
+                    title: L10n.Review.detectionTitle,
+                    subtitle: L10n.Review.detectionSubtitle
                 ) {
                     VStack(alignment: .leading, spacing: 12) {
                         Label(viewModel.ocrSummary, systemImage: "text.viewfinder")

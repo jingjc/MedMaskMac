@@ -80,6 +80,42 @@ final class AppViewModel: ObservableObject {
         exportService.exportSummary(for: files, preset: selectedPreset)
     }
 
+    var selectedFileDisplayLabel: String {
+        selectedFile?.displayName ?? L10n.Review.noFileSelected
+    }
+
+    var selectedPageDisplayLabel: String {
+        selectedDocumentPage?.title ?? L10n.Review.noPageSelected
+    }
+
+    var selectedFileRegionsSummary: String {
+        L10n.Common.selectedFileRegions(selectedFileRegionCount)
+    }
+
+    var totalSessionRegionsSummary: String {
+        L10n.Common.totalSessionRegions(totalRegionCount)
+    }
+
+    var preparedFilesSummary: String {
+        L10n.Common.fileCount(files.count)
+    }
+
+    var preparedPagesSummary: String {
+        L10n.Common.totalPageCount(totalPageCount)
+    }
+
+    var preparedRegionsSummary: String {
+        L10n.Common.placeholderRegionCount(totalRegionCount)
+    }
+
+    func fileSummary(for file: FileItem) -> String {
+        L10n.Common.filePageSummary(kind: file.kind.displayTitle, pageCount: file.pageCount)
+    }
+
+    func pageSummary(for page: PageItem) -> String {
+        L10n.Common.regionCount(page.sensitiveRegions.count)
+    }
+
     func selectFile(_ fileID: FileItem.ID) {
         selectedFileID = fileID
         selectedPageID = files.first { $0.id == fileID }?.pages.first?.id

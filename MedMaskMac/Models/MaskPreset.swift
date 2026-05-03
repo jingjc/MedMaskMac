@@ -10,22 +10,22 @@ enum MaskPreset: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .standard:
-            "Standard Redaction"
+            L10n.Preset.standardTitle
         case .strict:
-            "Strict Redaction"
+            L10n.Preset.strictTitle
         case .custom:
-            "Custom Redaction"
+            L10n.Preset.customTitle
         }
     }
 
     var summary: String {
         switch self {
         case .standard:
-            "Balanced default for common medical report cleanup."
+            L10n.Preset.standardSummary
         case .strict:
-            "Wider masking intended for conservative review."
+            L10n.Preset.strictSummary
         case .custom:
-            "Reserved for future manual redaction controls."
+            L10n.Preset.customSummary
         }
     }
 }

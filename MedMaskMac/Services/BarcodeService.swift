@@ -5,5 +5,5 @@ protocol BarcodeService {
 }
 
 struct PlaceholderBarcodeService: BarcodeService {
-    let statusSummary = "Barcode and QR detection are placeholder-only for now."
+    let statusSummary = L10n.Services.barcodeSummary
 }

@@ -6,6 +6,6 @@ protocol MaskComposeService {
 
 struct PlaceholderMaskComposeService: MaskComposeService {
     func previewSummary(for preset: MaskPreset, regionCount: Int) -> String {
-        "\(preset.title) will eventually burn \(regionCount) region(s) into the export copy."
+        L10n.Services.maskPreviewSummary(presetTitle: preset.title, regionCount: regionCount)
     }
 }

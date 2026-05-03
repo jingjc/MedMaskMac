@@ -4,6 +4,17 @@ enum PageProcessingStatus: String, CaseIterable, Hashable {
     case pendingDetection = "Pending Detection"
     case readyForReview = "Ready For Review"
     case maskedPreview = "Masked Preview"
+
+    var displayTitle: String {
+        switch self {
+        case .pendingDetection:
+            L10n.PageStatus.pendingDetection
+        case .readyForReview:
+            L10n.PageStatus.readyForReview
+        case .maskedPreview:
+            L10n.PageStatus.maskedPreview
+        }
+    }
 }
 
 struct PageItem: Identifiable, Hashable {
@@ -25,6 +36,6 @@ struct PageItem: Identifiable, Hashable {
     }
 
     var title: String {
-        "Page \(pageNumber)"
+        L10n.Common.pageTitle(pageNumber)
     }
 }
