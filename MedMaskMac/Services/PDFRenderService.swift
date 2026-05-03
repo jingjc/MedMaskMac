@@ -2,10 +2,14 @@ import AppKit
 import Foundation
 import PDFKit
 
+struct DocumentPreviewRasterContent {
+    let image: NSImage
+    let canvasSize: CGSize
+}
+
 enum DocumentPreviewContent {
     case empty
-    case image(NSImage)
-    case pdf(document: PDFDocument, pageIndex: Int)
+    case raster(DocumentPreviewRasterContent)
     case failure(message: String)
 }
 
@@ -19,6 +23,7 @@ protocol PDFRenderService {
 final class DefaultPDFRenderService: PDFRenderService {
     private var imageCache: [URL: NSImage] = [:]
     private var pdfCache: [URL: PDFDocument] = [:]
+    private var pdfPageCache: [PDFPageCacheKey: DocumentPreviewRasterContent] = [:]
 
     func canvasTitle(for page: PageItem?) -> String {
         if let page {
@@ -51,7 +56,12 @@ final class DefaultPDFRenderService: PDFRenderService {
 
     private func loadImagePreview(fileName: String, sourceURL: URL) -> DocumentPreviewContent {
         if let cachedImage = imageCache[sourceURL] {
-            return .image(cachedImage)
+            return .raster(
+                DocumentPreviewRasterContent(
+                    image: cachedImage,
+                    canvasSize: resolvedCanvasSize(for: cachedImage.size)
+                )
+            )
         }
 
         return withSecurityScopedAccess(to: sourceURL) {
@@ -60,7 +70,12 @@ final class DefaultPDFRenderService: PDFRenderService {
             }
 
             imageCache[sourceURL] = image
-            return .image(image)
+            return .raster(
+                DocumentPreviewRasterContent(
+                    image: image,
+                    canvasSize: resolvedCanvasSize(for: image.size)
+                )
+            )
         }
     }
 
@@ -92,11 +107,22 @@ final class DefaultPDFRenderService: PDFRenderService {
         }
 
         let resolvedPageIndex = max(0, min(preferredPageIndex, document.pageCount - 1))
-        guard document.page(at: resolvedPageIndex) != nil else {
+        let cacheKey = PDFPageCacheKey(sourceURL: sourceURL, pageIndex: resolvedPageIndex)
+        if let cachedPagePreview = pdfPageCache[cacheKey] {
+            return .raster(cachedPagePreview)
+        }
+
+        guard let page = document.page(at: resolvedPageIndex) else {
             return .failure(message: L10n.Review.previewUnavailable)
         }
 
-        return .pdf(document: document, pageIndex: resolvedPageIndex)
+        let pageBounds = page.bounds(for: .mediaBox).standardized
+        let canvasSize = resolvedCanvasSize(for: pageBounds.size)
+        let thumbnailSize = resolvedThumbnailSize(for: canvasSize)
+        let image = page.thumbnail(of: thumbnailSize, for: .mediaBox)
+        let rasterContent = DocumentPreviewRasterContent(image: image, canvasSize: canvasSize)
+        pdfPageCache[cacheKey] = rasterContent
+        return .raster(rasterContent)
     }
 
     private func withSecurityScopedAccess<T>(to url: URL, operation: () -> T) -> T {
@@ -109,4 +135,26 @@ final class DefaultPDFRenderService: PDFRenderService {
 
         return operation()
     }
+
+    private func resolvedCanvasSize(for size: CGSize) -> CGSize {
+        CGSize(width: max(size.width, 1), height: max(size.height, 1))
+    }
+
+    private func resolvedThumbnailSize(for canvasSize: CGSize) -> CGSize {
+        let maxDimension: CGFloat = 1800
+        let baseScale: CGFloat = 2.0
+        let currentMaxDimension = max(canvasSize.width, canvasSize.height)
+        let cappedScale = min(baseScale, maxDimension / max(currentMaxDimension, 1))
+        let resolvedScale = max(cappedScale, 1.0)
+
+        return CGSize(
+            width: max(canvasSize.width * resolvedScale, 1),
+            height: max(canvasSize.height * resolvedScale, 1)
+        )
+    }
+}
+
+private struct PDFPageCacheKey: Hashable {
+    let sourceURL: URL
+    let pageIndex: Int
 }

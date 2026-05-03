@@ -8,6 +8,7 @@ final class AppViewModel: ObservableObject {
     @Published var files: [FileItem]
     @Published var selectedFileID: FileItem.ID?
     @Published var selectedPageID: PageItem.ID?
+    @Published var selectedRegionID: SensitiveRegion.ID?
     @Published var importErrorMessage: String?
 
     private let fileImportService: any FileImportService
@@ -28,6 +29,7 @@ final class AppViewModel: ObservableObject {
         self.exportService = PlaceholderExportService()
         self.selectedFileID = nil
         self.selectedPageID = nil
+        self.selectedRegionID = nil
     }
 
     var selectedFile: FileItem? {
@@ -74,6 +76,18 @@ final class AppViewModel: ObservableObject {
 
     var selectedFileRegionCount: Int {
         selectedFile?.pages.reduce(0) { $0 + $1.sensitiveRegions.count } ?? 0
+    }
+
+    var selectedPageRegions: [SensitiveRegion] {
+        selectedDocumentPage?.sensitiveRegions ?? []
+    }
+
+    var selectedRegion: SensitiveRegion? {
+        selectedPageRegions.first { $0.id == selectedRegionID }
+    }
+
+    var hasSelectedRegion: Bool {
+        selectedRegion != nil
     }
 
     var maskPreviewSummary: String {
@@ -207,16 +221,76 @@ final class AppViewModel: ObservableObject {
     }
 
     func selectPage(_ pageID: PageItem.ID) {
+        guard let selectedFile, selectedFile.pages.contains(where: { $0.id == pageID }) else {
+            return
+        }
+
         selectedPageID = pageID
+        selectedRegionID = nil
 
         if let selectedFileID {
             lastSelectedPageByFileID[selectedFileID] = pageID
         }
     }
 
+    func selectRegion(_ regionID: SensitiveRegion.ID?) {
+        guard regionID != selectedRegionID else {
+            return
+        }
+
+        selectedRegionID = regionID
+    }
+
+    func clearSelectedRegionSelection() {
+        selectedRegionID = nil
+    }
+
+    func createRegion(with bounds: NormalizedRect) {
+        let clampedBounds = bounds.clamped()
+        guard clampedBounds.width > 0, clampedBounds.height > 0 else {
+            return
+        }
+
+        var createdRegionID: SensitiveRegion.ID?
+        mutateSelectedPage { page in
+            let region = SensitiveRegion(
+                kind: .freeform,
+                bounds: clampedBounds,
+                isMasked: true
+            )
+            page.sensitiveRegions.append(region)
+            createdRegionID = region.id
+        }
+
+        selectedRegionID = createdRegionID
+    }
+
+    func updateRegion(_ regionID: SensitiveRegion.ID, bounds: NormalizedRect) {
+        mutateSelectedPage { page in
+            guard let regionIndex = page.sensitiveRegions.firstIndex(where: { $0.id == regionID }) else {
+                return
+            }
+
+            page.sensitiveRegions[regionIndex].bounds = bounds.clamped()
+        }
+    }
+
+    func deleteSelectedRegion() {
+        guard let selectedRegionID else {
+            return
+        }
+
+        mutateSelectedPage { page in
+            page.sensitiveRegions.removeAll { $0.id == selectedRegionID }
+        }
+
+        self.selectedRegionID = nil
+    }
+
     private func applySelection(for file: FileItem, preferredPageID: PageItem.ID?) {
         selectedFileID = file.id
         selectedPageID = resolvedPageID(in: file, preferredPageID: preferredPageID)
+        selectedRegionID = nil
 
         if let selectedPageID {
             lastSelectedPageByFileID[file.id] = selectedPageID
@@ -229,5 +303,26 @@ final class AppViewModel: ObservableObject {
         }
 
         return file.pages.first?.id
+    }
+
+    private func mutateSelectedPage(_ mutation: (inout PageItem) -> Void) {
+        guard let selection = selectedPageLocation else {
+            return
+        }
+
+        var updatedFiles = files
+        mutation(&updatedFiles[selection.fileIndex].pages[selection.pageIndex])
+        files = updatedFiles
+    }
+
+    private var selectedPageLocation: (fileIndex: Int, pageIndex: Int)? {
+        guard let selectedFileID,
+              let fileIndex = files.firstIndex(where: { $0.id == selectedFileID }),
+              let selectedPageID,
+              let pageIndex = files[fileIndex].pages.firstIndex(where: { $0.id == selectedPageID }) else {
+            return nil
+        }
+
+        return (fileIndex, pageIndex)
     }
 }

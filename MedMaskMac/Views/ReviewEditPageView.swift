@@ -2,17 +2,31 @@ import SwiftUI
 
 struct ReviewEditPageView: View {
     @ObservedObject var viewModel: AppViewModel
+    private let sidebarWidth: CGFloat = 290
+    private let inspectorWidth: CGFloat = 320
 
     var body: some View {
-        HSplitView {
+        HStack(spacing: 0) {
             sidebar
-                .frame(minWidth: 250, idealWidth: 280, maxWidth: 320)
+                .frame(width: sidebarWidth)
+                .frame(maxHeight: .infinity, alignment: .top)
+
+            Divider()
 
             canvas
-                .frame(minWidth: 480, maxWidth: .infinity)
+                .frame(minWidth: 520, maxWidth: .infinity)
+                .frame(maxHeight: .infinity, alignment: .top)
+
+            Divider()
 
             inspector
-                .frame(minWidth: 280, idealWidth: 320, maxWidth: 360)
+                .frame(width: inspectorWidth)
+                .frame(maxHeight: .infinity, alignment: .top)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
+        .onDeleteCommand {
+            viewModel.deleteSelectedRegion()
         }
     }
 
@@ -97,40 +111,63 @@ struct ReviewEditPageView: View {
     }
 
     private var canvas: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text(L10n.Review.canvasSectionTitle)
-                .font(.title2.weight(.semibold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text(L10n.Review.canvasSectionTitle)
+                    .font(.title2.weight(.semibold))
 
-            PanelCard(
-                title: viewModel.canvasTitle,
-                subtitle: L10n.Review.canvasSubtitle
-            ) {
-                VStack(spacing: 18) {
-                    DocumentPreviewView(content: viewModel.previewContent)
+                PanelCard(
+                    title: viewModel.canvasTitle,
+                    subtitle: L10n.Review.canvasSubtitle
+                ) {
+                    VStack(spacing: 18) {
+                        DocumentPreviewView(
+                            content: viewModel.previewContent,
+                            regions: viewModel.selectedPageRegions,
+                            selectedRegionID: viewModel.selectedRegionID,
+                            onSelectRegion: viewModel.selectRegion,
+                            onCreateRegion: viewModel.createRegion(with:),
+                            onUpdateRegion: viewModel.updateRegion
+                        )
 
-                    HStack {
-                        Label(viewModel.selectedFileDisplayLabel, systemImage: "doc.text")
-                        Spacer()
-                        Label(viewModel.selectedPageDisplayLabel, systemImage: "doc.plaintext")
-                    }
-                    .foregroundStyle(.secondary)
-
-                    if let selectedPreviewMetadataSummary = viewModel.selectedPreviewMetadataSummary,
-                       let selectedPageStatusSummary = viewModel.selectedPageStatusSummary {
                         HStack {
-                            Text(selectedPreviewMetadataSummary)
+                            Label(viewModel.selectedFileDisplayLabel, systemImage: "doc.text")
                             Spacer()
-                            Text(selectedPageStatusSummary)
+                            Label(viewModel.selectedPageDisplayLabel, systemImage: "doc.plaintext")
+                        }
+                        .foregroundStyle(.secondary)
+
+                        HStack {
+                            if let selectedPreviewMetadataSummary = viewModel.selectedPreviewMetadataSummary,
+                               let selectedPageStatusSummary = viewModel.selectedPageStatusSummary {
+                                Text(selectedPreviewMetadataSummary)
+                                Spacer()
+                                Text(selectedPageStatusSummary)
+                            }
                         }
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                        HStack {
+                            Text(L10n.Review.manualEditHint)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Spacer()
+
+                            Button(role: .destructive) {
+                                viewModel.deleteSelectedRegion()
+                            } label: {
+                                Label(L10n.Review.deleteRegion, systemImage: "trash")
+                            }
+                            .keyboardShortcut(.delete, modifiers: [])
+                            .disabled(!viewModel.hasSelectedRegion)
+                        }
                     }
                 }
             }
-
-            Spacer(minLength: 0)
+            .padding(20)
         }
-        .padding(20)
     }
 
     private var inspector: some View {

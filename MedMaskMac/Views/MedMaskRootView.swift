@@ -6,9 +6,11 @@ struct MedMaskRootView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+                .zIndex(1)
             Divider()
             pageContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
         }
         .background(Color(nsColor: .windowBackgroundColor))
     }

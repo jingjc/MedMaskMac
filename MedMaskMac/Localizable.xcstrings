@@ -1004,6 +1004,40 @@
         }
       }
     },
+    "review.canvas.delete_region" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete Selected Region"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除所选区域"
+          }
+        }
+      }
+    },
+    "review.canvas.manual_edit_hint" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag on empty preview space to create a region. Delete removes the selected box."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在空白预览区域拖拽可创建区域。按 Delete 可删除当前选中的框。"
+          }
+        }
+      }
+    },
     "review.canvas.no_page" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1095,13 +1129,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Actual preview is shown here for imported images and PDF pages."
+            "value" : "Actual preview is shown here. Drag to create, move, resize, and delete manual regions on the selected page."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这里会显示已导入图像和 PDF 页面的真实预览。"
+            "value" : "这里会显示真实预览。你可以在所选页面上拖拽创建、移动、调整大小并删除手动区域。"
           }
         }
       }
@@ -1418,13 +1452,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ Canvas Placeholder"
+            "value" : "%@ Canvas"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ 画布占位"
+            "value" : "%@ 画布"
           }
         }
       }
@@ -1435,13 +1469,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Canvas Placeholder"
+            "value" : "Canvas"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "画布占位"
+            "value" : "画布"
           }
         }
       }

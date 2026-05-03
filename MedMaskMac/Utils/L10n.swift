@@ -156,7 +156,7 @@ enum L10n {
         static let pagesSubtitle = L10n.string("review.sidebar.pages_subtitle", default: "Pages discovered from the selected file.")
         static let noPagesAvailable = L10n.string("review.sidebar.no_pages", default: "Select a file to view its pages.")
         static let canvasSectionTitle = L10n.string("review.canvas.title", default: "Canvas")
-        static let canvasSubtitle = L10n.string("review.canvas.subtitle", default: "Actual preview is shown here for imported images and PDF pages.")
+        static let canvasSubtitle = L10n.string("review.canvas.subtitle", default: "Actual preview is shown here. Drag to create, move, resize, and delete manual regions on the selected page.")
         static let canvasPreviewPlaceholder = L10n.string("review.canvas.preview_placeholder", default: "Select a file and page to preview.")
         static let noFileSelected = L10n.string("review.canvas.no_file", default: "No file selected")
         static let noPageSelected = L10n.string("review.canvas.no_page", default: "No page selected")
@@ -165,6 +165,8 @@ enum L10n {
         static let maskPreset = L10n.string("review.inspector.mask_preset", default: "Mask Preset")
         static let detectionTitle = L10n.string("review.inspector.detection_title", default: "Detection Status")
         static let detectionSubtitle = L10n.string("review.inspector.detection_subtitle", default: "Service placeholders only. No OCR or barcode pass runs yet.")
+        static let manualEditHint = L10n.string("review.canvas.manual_edit_hint", default: "Drag on empty preview space to create a region. Delete removes the selected box.")
+        static let deleteRegion = L10n.string("review.canvas.delete_region", default: "Delete Selected Region")
 
         static var previewUnavailable: String {
             L10n.string("review.canvas.preview_unavailable", default: "Preview unavailable for the selected content.")
@@ -199,12 +201,12 @@ enum L10n {
 
     enum Services {
         static let fileImportGuidance = L10n.string("service.file_import.guidance", default: "Choose local PDF or image files. They remain in memory for this session only.")
-        static let emptyCanvasTitle = L10n.string("service.pdf.canvas_title_empty", default: "Canvas Placeholder")
+        static let emptyCanvasTitle = L10n.string("service.pdf.canvas_title_empty", default: "Canvas")
         static let ocrSummary = L10n.string("service.ocr.summary", default: "OCR is not implemented in the current phase.")
         static let barcodeSummary = L10n.string("service.barcode.summary", default: "Barcode and QR detection are placeholder-only for now.")
 
         static func canvasTitle(for pageTitle: String) -> String {
-            L10n.formatted("service.pdf.canvas_title", default: "%@ Canvas Placeholder", pageTitle)
+            L10n.formatted("service.pdf.canvas_title", default: "%@ Canvas", pageTitle)
         }
 
         static func maskPreviewSummary(presetTitle: String, regionCount: Int) -> String {
