@@ -44,6 +44,17 @@ struct NormalizedRect: Hashable {
         )
     }
 
+    func rectInCoreGraphicsSpace(in size: CGSize) -> CGRect {
+        let topLeftRect = rect(in: size)
+
+        return CGRect(
+            x: topLeftRect.minX,
+            y: size.height - topLeftRect.maxY,
+            width: topLeftRect.width,
+            height: topLeftRect.height
+        )
+    }
+
     func clamped() -> NormalizedRect {
         let clampedX = x.clamped(to: 0...1)
         let clampedY = y.clamped(to: 0...1)

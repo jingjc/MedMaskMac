@@ -9,5 +9,8 @@ struct MedMaskMacApp: App {
             MedMaskRootView(viewModel: viewModel)
                 .frame(minWidth: 1180, minHeight: 760)
         }
+        .commands {
+            MedMaskCommands(viewModel: viewModel)
+        }
     }
 }

@@ -7,18 +7,27 @@ struct RegionEditorOverlayView: View {
     let onSelectRegion: (SensitiveRegion.ID?) -> Void
     let onCreateRegion: (NormalizedRect) -> Void
     let onUpdateRegion: (SensitiveRegion.ID, NormalizedRect) -> Void
+    let onEditTransactionBegan: () -> Void
+    let onEditTransactionEnded: () -> Void
 
     @State private var draftCreationRect: CGRect?
     @State private var moveSession: RegionMoveSession?
     @State private var resizeSession: RegionResizeSession?
 
-    private let minimumRegionLength: CGFloat = 18
-    private let handleDiameter: CGFloat = 14
+    private let minimumRegionLength: CGFloat = 20
+    private let handleDiameter: CGFloat = 12
+    private let handleHitDiameter: CGFloat = 30
 
     var body: some View {
         ZStack(alignment: .topLeading) {
+            interactionBackground
+
             ForEach(regions) { region in
-                regionView(for: region)
+                regionBody(for: region)
+            }
+
+            if let selectedRegion {
+                resizeHandles(for: selectedRegion)
             }
 
             if let draftCreationRect {
@@ -37,13 +46,28 @@ struct RegionEditorOverlayView: View {
             }
         }
         .frame(width: contentSize.width, height: contentSize.height, alignment: .topLeading)
-        .contentShape(Rectangle())
         .clipped()
-        .gesture(createGesture)
-        .gesture(emptySpaceTapGesture)
     }
 
-    private func regionView(for region: SensitiveRegion) -> some View {
+    private var interactionBackground: some View {
+        Rectangle()
+            .fill(.clear)
+            .contentShape(Rectangle())
+            .frame(width: contentSize.width, height: contentSize.height)
+            .gesture(createGesture)
+            .simultaneousGesture(emptySpaceTapGesture)
+            .zIndex(0)
+    }
+
+    private var selectedRegion: SensitiveRegion? {
+        guard let selectedRegionID else {
+            return nil
+        }
+
+        return regions.first { $0.id == selectedRegionID }
+    }
+
+    private func regionBody(for region: SensitiveRegion) -> some View {
         let rect = region.bounds.rect(in: contentSize)
         let isSelected = region.id == selectedRegionID
 
@@ -60,26 +84,33 @@ struct RegionEditorOverlayView: View {
                     )
                 )
 
-            if isSelected {
-                ForEach(RegionHandleCorner.allCases, id: \.self) { corner in
-                    Circle()
-                        .fill(Color.accentColor)
-                        .frame(width: handleDiameter, height: handleDiameter)
-                        .overlay(
-                            Circle()
-                                .strokeBorder(Color.white, lineWidth: 2)
-                        )
-                        .position(handlePosition(for: corner, in: rect.size))
-                        .highPriorityGesture(resizeGesture(for: region, corner: corner))
-                }
-            }
         }
         .frame(width: rect.width, height: rect.height)
         .position(x: rect.midX, y: rect.midY)
         .contentShape(Rectangle())
-        .highPriorityGesture(selectRegionTapGesture(for: region))
+        .simultaneousGesture(selectRegionTapGesture(for: region))
         .applyIf(isSelected) { view in
-            view.highPriorityGesture(moveGesture(for: region))
+            view.gesture(moveGesture(for: region))
+        }
+        .zIndex(isSelected ? 1 : 0.5)
+    }
+
+    private func resizeHandles(for region: SensitiveRegion) -> some View {
+        let rect = region.bounds.rect(in: contentSize)
+
+        return ForEach(RegionHandleCorner.allCases, id: \.self) { corner in
+            Circle()
+                .fill(Color.accentColor)
+                .frame(width: handleDiameter, height: handleDiameter)
+                .overlay(
+                    Circle()
+                        .strokeBorder(Color.white, lineWidth: 2)
+                )
+                .frame(width: handleHitDiameter, height: handleHitDiameter)
+                .contentShape(Rectangle())
+                .position(handlePosition(for: corner, in: rect))
+                .gesture(resizeGesture(for: region, corner: corner))
+                .zIndex(2)
         }
     }
 
@@ -87,8 +118,7 @@ struct RegionEditorOverlayView: View {
         DragGesture(minimumDistance: 4)
             .onChanged { value in
                 guard resizeSession == nil,
-                      moveSession == nil,
-                      region(at: value.startLocation) == nil else {
+                      moveSession == nil else {
                     return
                 }
 
@@ -102,10 +132,6 @@ struct RegionEditorOverlayView: View {
                     draftCreationRect = nil
                 }
 
-                guard region(at: value.startLocation) == nil else {
-                    return
-                }
-
                 let proposedRect = clampedDraftRect(
                     from: value.startLocation,
                     to: value.location
@@ -115,17 +141,15 @@ struct RegionEditorOverlayView: View {
                     return
                 }
 
+                onEditTransactionBegan()
                 onCreateRegion(NormalizedRect(rect: proposedRect, in: contentSize))
+                onEditTransactionEnded()
             }
     }
 
     private var emptySpaceTapGesture: some Gesture {
         SpatialTapGesture()
-            .onEnded { value in
-                guard region(at: value.location) == nil else {
-                    return
-                }
-
+            .onEnded { _ in
                 onSelectRegion(nil)
             }
     }
@@ -141,6 +165,8 @@ struct RegionEditorOverlayView: View {
         DragGesture(minimumDistance: 1)
             .onChanged { value in
                 if moveSession?.regionID != region.id {
+                    onEditTransactionBegan()
+                    onSelectRegion(region.id)
                     moveSession = RegionMoveSession(
                         regionID: region.id,
                         initialRect: region.bounds.rect(in: contentSize)
@@ -162,6 +188,7 @@ struct RegionEditorOverlayView: View {
             }
             .onEnded { _ in
                 moveSession = nil
+                onEditTransactionEnded()
             }
     }
 
@@ -169,6 +196,8 @@ struct RegionEditorOverlayView: View {
         DragGesture(minimumDistance: 1)
             .onChanged { value in
                 if resizeSession?.regionID != region.id || resizeSession?.corner != corner {
+                    onEditTransactionBegan()
+                    onSelectRegion(region.id)
                     resizeSession = RegionResizeSession(
                         regionID: region.id,
                         corner: corner,
@@ -190,19 +219,20 @@ struct RegionEditorOverlayView: View {
             }
             .onEnded { _ in
                 resizeSession = nil
+                onEditTransactionEnded()
             }
     }
 
-    private func handlePosition(for corner: RegionHandleCorner, in size: CGSize) -> CGPoint {
+    private func handlePosition(for corner: RegionHandleCorner, in rect: CGRect) -> CGPoint {
         switch corner {
         case .topLeft:
-            CGPoint(x: 0, y: 0)
+            CGPoint(x: rect.minX, y: rect.minY)
         case .topRight:
-            CGPoint(x: size.width, y: 0)
+            CGPoint(x: rect.maxX, y: rect.minY)
         case .bottomLeft:
-            CGPoint(x: 0, y: size.height)
+            CGPoint(x: rect.minX, y: rect.maxY)
         case .bottomRight:
-            CGPoint(x: size.width, y: size.height)
+            CGPoint(x: rect.maxX, y: rect.maxY)
         }
     }
 
@@ -216,18 +246,24 @@ struct RegionEditorOverlayView: View {
     }
 
     private func clampedMovingRect(_ rect: CGRect) -> CGRect {
-        let clampedX = min(max(rect.minX, contentBounds.minX), contentBounds.maxX - rect.width)
-        let clampedY = min(max(rect.minY, contentBounds.minY), contentBounds.maxY - rect.height)
+        let width = min(max(rect.width, minimumRegionLength), contentBounds.width)
+        let height = min(max(rect.height, minimumRegionLength), contentBounds.height)
+        let clampedX = rect.minX.clamped(min: contentBounds.minX, max: contentBounds.maxX - width)
+        let clampedY = rect.minY.clamped(min: contentBounds.minY, max: contentBounds.maxY - height)
 
         return CGRect(
             x: clampedX,
             y: clampedY,
-            width: rect.width,
-            height: rect.height
+            width: width,
+            height: height
         )
     }
 
     private func resizedRect(from initialRect: CGRect, corner: RegionHandleCorner, translation: CGSize) -> CGRect {
+        let minimumSize = CGSize(
+            width: min(minimumRegionLength, contentBounds.width),
+            height: min(minimumRegionLength, contentBounds.height)
+        )
         var minX = initialRect.minX
         var minY = initialRect.minY
         var maxX = initialRect.maxX
@@ -235,17 +271,25 @@ struct RegionEditorOverlayView: View {
 
         switch corner {
         case .topLeft:
-            minX = min(max(initialRect.minX + translation.width, contentBounds.minX), initialRect.maxX - minimumRegionLength)
-            minY = min(max(initialRect.minY + translation.height, contentBounds.minY), initialRect.maxY - minimumRegionLength)
+            minX = (initialRect.minX + translation.width)
+                .clamped(min: contentBounds.minX, max: initialRect.maxX - minimumSize.width)
+            minY = (initialRect.minY + translation.height)
+                .clamped(min: contentBounds.minY, max: initialRect.maxY - minimumSize.height)
         case .topRight:
-            maxX = max(min(initialRect.maxX + translation.width, contentBounds.maxX), initialRect.minX + minimumRegionLength)
-            minY = min(max(initialRect.minY + translation.height, contentBounds.minY), initialRect.maxY - minimumRegionLength)
+            maxX = (initialRect.maxX + translation.width)
+                .clamped(min: initialRect.minX + minimumSize.width, max: contentBounds.maxX)
+            minY = (initialRect.minY + translation.height)
+                .clamped(min: contentBounds.minY, max: initialRect.maxY - minimumSize.height)
         case .bottomLeft:
-            minX = min(max(initialRect.minX + translation.width, contentBounds.minX), initialRect.maxX - minimumRegionLength)
-            maxY = max(min(initialRect.maxY + translation.height, contentBounds.maxY), initialRect.minY + minimumRegionLength)
+            minX = (initialRect.minX + translation.width)
+                .clamped(min: contentBounds.minX, max: initialRect.maxX - minimumSize.width)
+            maxY = (initialRect.maxY + translation.height)
+                .clamped(min: initialRect.minY + minimumSize.height, max: contentBounds.maxY)
         case .bottomRight:
-            maxX = max(min(initialRect.maxX + translation.width, contentBounds.maxX), initialRect.minX + minimumRegionLength)
-            maxY = max(min(initialRect.maxY + translation.height, contentBounds.maxY), initialRect.minY + minimumRegionLength)
+            maxX = (initialRect.maxX + translation.width)
+                .clamped(min: initialRect.minX + minimumSize.width, max: contentBounds.maxX)
+            maxY = (initialRect.maxY + translation.height)
+                .clamped(min: initialRect.minY + minimumSize.height, max: contentBounds.maxY)
         }
 
         return CGRect(
@@ -258,12 +302,6 @@ struct RegionEditorOverlayView: View {
 
     private func isLargeEnough(_ rect: CGRect) -> Bool {
         rect.width >= minimumRegionLength && rect.height >= minimumRegionLength
-    }
-
-    private func region(at point: CGPoint) -> SensitiveRegion? {
-        regions.first { region in
-            region.bounds.rect(in: contentSize).contains(point)
-        }
     }
 
     private var contentBounds: CGRect {
@@ -287,6 +325,15 @@ private struct RegionResizeSession {
     let regionID: SensitiveRegion.ID
     let corner: RegionHandleCorner
     let initialRect: CGRect
+}
+
+private extension CGFloat {
+    func clamped(min lowerBound: CGFloat, max upperBound: CGFloat) -> CGFloat {
+        let resolvedLowerBound = Swift.min(lowerBound, upperBound)
+        let resolvedUpperBound = Swift.max(lowerBound, upperBound)
+
+        return Swift.min(Swift.max(self, resolvedLowerBound), resolvedUpperBound)
+    }
 }
 
 private extension View {

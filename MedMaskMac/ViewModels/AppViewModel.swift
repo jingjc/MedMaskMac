@@ -4,12 +4,36 @@ import Foundation
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published var selectedPage: AppPage = .import
-    @Published var selectedPreset: MaskPreset = .standard
-    @Published var files: [FileItem]
+    @Published var selectedPreset: MaskPreset = .standard {
+        didSet {
+            guard oldValue != selectedPreset else {
+                return
+            }
+
+            lastExportResult = nil
+        }
+    }
+    @Published var previewDisplayMode: ReviewPreviewMode = .original {
+        didSet {
+            if previewDisplayMode == .maskedPreview {
+                selectedRegionID = nil
+            }
+        }
+    }
+    @Published var files: [FileItem] {
+        didSet {
+            guard oldValue != files else {
+                return
+            }
+
+            lastExportResult = nil
+        }
+    }
     @Published var selectedFileID: FileItem.ID?
     @Published var selectedPageID: PageItem.ID?
     @Published var selectedRegionID: SensitiveRegion.ID?
     @Published var importErrorMessage: String?
+    @Published var lastExportResult: ExportResult?
 
     private let fileImportService: any FileImportService
     private let pdfRenderService: any PDFRenderService
@@ -18,6 +42,10 @@ final class AppViewModel: ObservableObject {
     private let maskComposeService: any MaskComposeService
     private let exportService: any ExportService
     private var lastSelectedPageByFileID: [FileItem.ID: PageItem.ID] = [:]
+    private var undoStack: [PageEditSnapshot] = []
+    private var redoStack: [PageEditSnapshot] = []
+    private var historyPageID: PageItem.ID?
+    private var isPageEditTransactionOpen = false
 
     init() {
         self.files = []
@@ -25,11 +53,12 @@ final class AppViewModel: ObservableObject {
         self.pdfRenderService = DefaultPDFRenderService()
         self.ocrService = PlaceholderOCRService()
         self.barcodeService = PlaceholderBarcodeService()
-        self.maskComposeService = PlaceholderMaskComposeService()
-        self.exportService = PlaceholderExportService()
+        self.maskComposeService = DefaultMaskComposeService()
+        self.exportService = DefaultExportService(maskComposeService: maskComposeService)
         self.selectedFileID = nil
         self.selectedPageID = nil
         self.selectedRegionID = nil
+        self.lastExportResult = nil
     }
 
     var selectedFile: FileItem? {
@@ -53,7 +82,21 @@ final class AppViewModel: ObservableObject {
     }
 
     var previewContent: DocumentPreviewContent {
-        pdfRenderService.previewContent(for: selectedFile, page: selectedDocumentPage)
+        let baseContent = pdfRenderService.previewContent(for: selectedFile, page: selectedDocumentPage)
+
+        guard previewDisplayMode == .maskedPreview,
+              let selectedDocumentPage,
+              case let .raster(rasterContent) = baseContent else {
+            return baseContent
+        }
+
+        return .raster(
+            maskComposeService.maskedPreview(
+                from: rasterContent,
+                regions: selectedDocumentPage.sensitiveRegions,
+                preset: selectedPreset
+            )
+        )
     }
 
     var ocrSummary: String {
@@ -90,16 +133,76 @@ final class AppViewModel: ObservableObject {
         selectedRegion != nil
     }
 
+    var canDeleteSelectedRegion: Bool {
+        isEditingEnabled && selectedRegion != nil
+    }
+
     var maskPreviewSummary: String {
         maskComposeService.previewSummary(for: selectedPreset, regionCount: totalRegionCount)
     }
 
-    var exportPlaceholderSummary: String {
-        exportService.exportSummary(for: files, preset: selectedPreset)
+    var exportPreparedSummary: String {
+        exportService.preparedSummary(for: files, preset: selectedPreset)
     }
 
     var hasImportedFiles: Bool {
         !files.isEmpty
+    }
+
+    var isReviewPageActive: Bool {
+        selectedPage == .reviewEdit
+    }
+
+    var isEditingEnabled: Bool {
+        previewDisplayMode == .original
+    }
+
+    var displayedPreviewRegions: [SensitiveRegion] {
+        isEditingEnabled ? selectedPageRegions : []
+    }
+
+    var canUndoCurrentPageEdit: Bool {
+        !undoStack.isEmpty
+    }
+
+    var canRedoCurrentPageEdit: Bool {
+        !redoStack.isEmpty
+    }
+
+    var canGoToPreviousPage: Bool {
+        guard let pages = selectedFile?.pages,
+              let selectedPageID,
+              let pageIndex = pages.firstIndex(where: { $0.id == selectedPageID }) else {
+            return false
+        }
+
+        return pageIndex > 0
+    }
+
+    var canGoToNextPage: Bool {
+        guard let pages = selectedFile?.pages,
+              let selectedPageID,
+              let pageIndex = pages.firstIndex(where: { $0.id == selectedPageID }) else {
+            return false
+        }
+
+        return pageIndex < pages.index(before: pages.endIndex)
+    }
+
+    var shouldShowPagesCard: Bool {
+        guard let selectedFile else {
+            return false
+        }
+
+        return selectedFile.pageCount > 1
+    }
+
+    var canBeginExportFlow: Bool {
+        hasImportedFiles
+    }
+
+    var canOpenExportDestination: Bool {
+        lastExportResult != nil
     }
 
     var selectedFileDisplayLabel: String {
@@ -108,6 +211,19 @@ final class AppViewModel: ObservableObject {
 
     var selectedPageDisplayLabel: String {
         selectedDocumentPage?.title ?? L10n.Review.noPageSelected
+    }
+
+    var selectedSinglePageSidebarMetadata: String? {
+        guard let selectedFile,
+              selectedFile.pageCount == 1,
+              let page = selectedFile.pages.first else {
+            return nil
+        }
+
+        return L10n.Review.singlePageMetadata(
+            pageSummary: pageSummary(for: page),
+            status: page.status.displayTitle
+        )
     }
 
     var selectedFileRegionsSummary: String {
@@ -139,7 +255,35 @@ final class AppViewModel: ObservableObject {
     }
 
     var preparedRegionsSummary: String {
-        L10n.Common.placeholderRegionCount(totalRegionCount)
+        L10n.Common.regionCount(totalRegionCount)
+    }
+
+    var lastExportDestinationPath: String? {
+        lastExportResult?.destinationURL.path
+    }
+
+    var exportSuccessSummary: String? {
+        guard let lastExportResult else {
+            return nil
+        }
+
+        return L10n.Export.successCount(lastExportResult.successCount)
+    }
+
+    var exportFailureSummary: String? {
+        guard let lastExportResult else {
+            return nil
+        }
+
+        return L10n.Export.failureCount(lastExportResult.failureCount)
+    }
+
+    var hasExportFailures: Bool {
+        guard let lastExportResult else {
+            return false
+        }
+
+        return !lastExportResult.failures.isEmpty
     }
 
     var selectedFileMetadataSummary: String? {
@@ -163,7 +307,11 @@ final class AppViewModel: ObservableObject {
     }
 
     var selectedPageStatusSummary: String? {
-        selectedDocumentPage?.status.displayTitle
+        if previewDisplayMode == .maskedPreview {
+            return L10n.PageStatus.maskedPreview
+        }
+
+        return selectedDocumentPage?.status.displayTitle
     }
 
     func fileSummary(for file: FileItem) -> String {
@@ -227,6 +375,7 @@ final class AppViewModel: ObservableObject {
 
         selectedPageID = pageID
         selectedRegionID = nil
+        clearPageHistory()
 
         if let selectedFileID {
             lastSelectedPageByFileID[selectedFileID] = pageID
@@ -234,6 +383,16 @@ final class AppViewModel: ObservableObject {
     }
 
     func selectRegion(_ regionID: SensitiveRegion.ID?) {
+        guard let regionID else {
+            selectedRegionID = nil
+            return
+        }
+
+        guard selectedPageRegions.contains(where: { $0.id == regionID }) else {
+            selectedRegionID = nil
+            return
+        }
+
         guard regionID != selectedRegionID else {
             return
         }
@@ -251,6 +410,7 @@ final class AppViewModel: ObservableObject {
             return
         }
 
+        let startedImplicitTransaction = beginImplicitPageEditTransactionIfNeeded()
         var createdRegionID: SensitiveRegion.ID?
         mutateSelectedPage { page in
             let region = SensitiveRegion(
@@ -263,9 +423,14 @@ final class AppViewModel: ObservableObject {
         }
 
         selectedRegionID = createdRegionID
+
+        if startedImplicitTransaction {
+            endPageEditTransaction()
+        }
     }
 
     func updateRegion(_ regionID: SensitiveRegion.ID, bounds: NormalizedRect) {
+        let startedImplicitTransaction = beginImplicitPageEditTransactionIfNeeded()
         mutateSelectedPage { page in
             guard let regionIndex = page.sensitiveRegions.firstIndex(where: { $0.id == regionID }) else {
                 return
@@ -273,24 +438,133 @@ final class AppViewModel: ObservableObject {
 
             page.sensitiveRegions[regionIndex].bounds = bounds.clamped()
         }
+
+        if startedImplicitTransaction {
+            endPageEditTransaction()
+        }
     }
 
     func deleteSelectedRegion() {
-        guard let selectedRegionID else {
+        guard canDeleteSelectedRegion, let selectedRegionID else {
             return
         }
 
+        let startedImplicitTransaction = beginImplicitPageEditTransactionIfNeeded()
         mutateSelectedPage { page in
             page.sensitiveRegions.removeAll { $0.id == selectedRegionID }
         }
 
         self.selectedRegionID = nil
+
+        if startedImplicitTransaction {
+            endPageEditTransaction()
+        }
+    }
+
+    func beginPageEditTransaction() {
+        guard let selectedPageID else {
+            return
+        }
+
+        if historyPageID != selectedPageID {
+            clearPageHistory()
+            historyPageID = selectedPageID
+        }
+
+        guard !isPageEditTransactionOpen, let snapshot = currentPageEditSnapshot else {
+            return
+        }
+
+        undoStack.append(snapshot)
+        if undoStack.count > 20 {
+            undoStack.removeFirst(undoStack.count - 20)
+        }
+        redoStack.removeAll()
+        isPageEditTransactionOpen = true
+    }
+
+    func endPageEditTransaction() {
+        isPageEditTransactionOpen = false
+    }
+
+    func undoCurrentPageEdit() {
+        guard let snapshot = undoStack.popLast(),
+              let currentSnapshot = currentPageEditSnapshot else {
+            return
+        }
+
+        redoStack.append(currentSnapshot)
+        applyPageEditSnapshot(snapshot)
+        isPageEditTransactionOpen = false
+    }
+
+    func redoCurrentPageEdit() {
+        guard let snapshot = redoStack.popLast(),
+              let currentSnapshot = currentPageEditSnapshot else {
+            return
+        }
+
+        undoStack.append(currentSnapshot)
+        applyPageEditSnapshot(snapshot)
+        isPageEditTransactionOpen = false
+    }
+
+    func goToPreviousPage() {
+        guard let pages = selectedFile?.pages,
+              let selectedPageID,
+              let currentIndex = pages.firstIndex(where: { $0.id == selectedPageID }),
+              currentIndex > 0 else {
+            return
+        }
+
+        selectPage(pages[currentIndex - 1].id)
+    }
+
+    func goToNextPage() {
+        guard let pages = selectedFile?.pages,
+              let selectedPageID,
+              let currentIndex = pages.firstIndex(where: { $0.id == selectedPageID }),
+              currentIndex < pages.index(before: pages.endIndex) else {
+            return
+        }
+
+        selectPage(pages[currentIndex + 1].id)
+    }
+
+    func togglePreviewDisplayMode() {
+        previewDisplayMode = previewDisplayMode.toggled()
+    }
+
+    func beginExportFlow() {
+        guard canBeginExportFlow else {
+            return
+        }
+
+        guard let destinationURL = exportService.chooseDestination() else {
+            return
+        }
+
+        lastExportResult = exportService.exportSession(
+            files: files,
+            preset: selectedPreset,
+            destinationURL: destinationURL
+        )
+        selectedPage = .exportSummary
+    }
+
+    func openExportDestination() {
+        guard let destinationURL = lastExportResult?.destinationURL else {
+            return
+        }
+
+        exportService.openFolder(at: destinationURL)
     }
 
     private func applySelection(for file: FileItem, preferredPageID: PageItem.ID?) {
         selectedFileID = file.id
         selectedPageID = resolvedPageID(in: file, preferredPageID: preferredPageID)
         selectedRegionID = nil
+        clearPageHistory()
 
         if let selectedPageID {
             lastSelectedPageByFileID[file.id] = selectedPageID
@@ -325,4 +599,49 @@ final class AppViewModel: ObservableObject {
 
         return (fileIndex, pageIndex)
     }
+
+    private func beginImplicitPageEditTransactionIfNeeded() -> Bool {
+        guard !isPageEditTransactionOpen else {
+            return false
+        }
+
+        beginPageEditTransaction()
+        return true
+    }
+
+    private func clearPageHistory() {
+        undoStack.removeAll()
+        redoStack.removeAll()
+        historyPageID = selectedPageID
+        isPageEditTransactionOpen = false
+    }
+
+    private func applyPageEditSnapshot(_ snapshot: PageEditSnapshot) {
+        mutateSelectedPage { page in
+            page.sensitiveRegions = snapshot.regions
+        }
+
+        if let selectedRegionID = snapshot.selectedRegionID,
+           selectedPageRegions.contains(where: { $0.id == selectedRegionID }) {
+            self.selectedRegionID = selectedRegionID
+        } else {
+            self.selectedRegionID = nil
+        }
+    }
+
+    private var currentPageEditSnapshot: PageEditSnapshot? {
+        guard let selectedDocumentPage else {
+            return nil
+        }
+
+        return PageEditSnapshot(
+            regions: selectedDocumentPage.sensitiveRegions,
+            selectedRegionID: selectedRegionID
+        )
+    }
+}
+
+private struct PageEditSnapshot {
+    let regions: [SensitiveRegion]
+    let selectedRegionID: SensitiveRegion.ID?
 }

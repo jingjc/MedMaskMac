@@ -41,9 +41,9 @@ enum L10n {
             case .import:
                 L10n.string("nav.import.subtitle", default: "Prepare PDFs or images for a local redaction pass.")
             case .reviewEdit:
-                L10n.string("nav.review.subtitle", default: "Inspect page structure before masking and export are implemented.")
+                L10n.string("nav.review.subtitle", default: "Review pages, place manual masks, and prepare the current session for export.")
             case .exportSummary:
-                L10n.string("nav.export.subtitle", default: "Review the shell of the final redaction handoff.")
+                L10n.string("nav.export.subtitle", default: "Review export results for the current session and open the output folder.")
             }
         }
     }
@@ -71,7 +71,7 @@ enum L10n {
         static let strictTitle = L10n.string("preset.strict.title", default: "Strict Redaction")
         static let strictSummary = L10n.string("preset.strict.summary", default: "Wider masking intended for conservative review.")
         static let customTitle = L10n.string("preset.custom.title", default: "Custom Redaction")
-        static let customSummary = L10n.string("preset.custom.summary", default: "Reserved for future manual redaction controls.")
+        static let customSummary = L10n.string("preset.custom.summary", default: "Use when you want to manage manual regions directly.")
     }
 
     enum Common {
@@ -99,10 +99,6 @@ enum L10n {
             L10n.formatted("common.total_page_count", default: "%@ total page(s)", countText(count))
         }
 
-        static func placeholderRegionCount(_ count: Int) -> String {
-            L10n.formatted("common.placeholder_region_count", default: "%@ placeholder sensitive region(s)", countText(count))
-        }
-
         static func filePageSummary(kind: String, pageCount: Int) -> String {
             L10n.formatted("common.file_page_summary", default: "%@ • %@", kind, self.pageCount(pageCount))
         }
@@ -118,10 +114,10 @@ enum L10n {
 
     enum Import {
         static let title = L10n.string("import.title", default: "Import Page")
-        static let description = L10n.string("import.description", default: "Choose local PDF or image files to load them into the current session. OCR, barcode detection, and export remain unimplemented.")
+        static let description = L10n.string("import.description", default: "Choose local PDF or image files to load them into the current session. OCR and barcode detection are still out of scope.")
         static let actionTitle = L10n.string("import.card.title", default: "Import Files")
         static let localFirst = L10n.string("import.local_first", default: "Local-only session")
-        static let noBackground = L10n.string("import.no_background", default: "Metadata import only. No OCR, barcode scan, or export yet")
+        static let noBackground = L10n.string("import.no_background", default: "Metadata import only. OCR and barcode scan are still out of scope")
         static let chooseFiles = L10n.string("import.choose_files", default: "Choose Files")
         static let goToReview = L10n.string("import.go_to_review", default: "Go to Review / Edit")
         static let importedFilesTitle = L10n.string("import.card.session_seed_title", default: "Imported Files")
@@ -161,12 +157,23 @@ enum L10n {
         static let noFileSelected = L10n.string("review.canvas.no_file", default: "No file selected")
         static let noPageSelected = L10n.string("review.canvas.no_page", default: "No page selected")
         static let inspectorTitle = L10n.string("review.inspector.title", default: "Inspector")
-        static let inspectorSubtitle = L10n.string("review.inspector.subtitle", default: "Right-side placeholder for mask settings and page details.")
+        static let inspectorSubtitle = L10n.string("review.inspector.subtitle", default: "Mask settings and current-session region counts for the selected file.")
         static let maskPreset = L10n.string("review.inspector.mask_preset", default: "Mask Preset")
         static let detectionTitle = L10n.string("review.inspector.detection_title", default: "Detection Status")
-        static let detectionSubtitle = L10n.string("review.inspector.detection_subtitle", default: "Service placeholders only. No OCR or barcode pass runs yet.")
+        static let detectionSubtitle = L10n.string("review.inspector.detection_subtitle", default: "OCR and barcode services are not part of this V0.")
         static let manualEditHint = L10n.string("review.canvas.manual_edit_hint", default: "Drag on empty preview space to create a region. Delete removes the selected box.")
-        static let deleteRegion = L10n.string("review.canvas.delete_region", default: "Delete Selected Region")
+        static let maskedPreviewHint = L10n.string("review.canvas.masked_preview_hint", default: "Masked preview is view-only. Switch back to Original to edit boxes.")
+        static let deleteRegion = L10n.string("review.canvas.delete_region", default: "Delete Selected Box")
+        static let previewMode = L10n.string("review.canvas.preview_mode", default: "Preview Mode")
+        static let originalPreview = L10n.string("review.canvas.original_preview", default: "Original")
+        static let maskedPreview = L10n.string("review.canvas.masked_preview", default: "Masked Preview")
+        static let showOriginalPreview = L10n.string("review.command.show_original", default: "Show Original")
+        static let showMaskedPreview = L10n.string("review.command.show_masked", default: "Show Masked Preview")
+        static let undo = L10n.string("review.command.undo", default: "Undo")
+        static let redo = L10n.string("review.command.redo", default: "Redo")
+        static let previousPage = L10n.string("review.command.previous_page", default: "Previous Page")
+        static let nextPage = L10n.string("review.command.next_page", default: "Next Page")
+        static let commandMenuTitle = L10n.string("review.command.menu_title", default: "Review")
 
         static var previewUnavailable: String {
             L10n.string("review.canvas.preview_unavailable", default: "Preview unavailable for the selected content.")
@@ -185,25 +192,69 @@ enum L10n {
                 L10n.countText(pageCount)
             )
         }
+
+        static func singlePageMetadata(pageSummary: String, status: String) -> String {
+            L10n.formatted(
+                "review.sidebar.single_page_metadata",
+                default: "Single page • %1$@ • %2$@",
+                pageSummary,
+                status
+            )
+        }
     }
 
     enum Export {
         static let title = L10n.string("export.title", default: "Export Summary")
-        static let description = L10n.string("export.description", default: "Export is intentionally not implemented in this phase. This page only establishes the shell and the future summary surface.")
+        static let description = L10n.string("export.description", default: "Review the current session, export redacted copies to a local folder, and inspect any per-file failures.")
         static let preparedTitle = L10n.string("export.prepared_title", default: "Prepared Session")
-        static let nextPhaseTitle = L10n.string("export.next_phase_title", default: "Next Phase Boundary")
-        static let nextPhaseSubtitle = L10n.string("export.next_phase_subtitle", default: "Scope remains fixed to a shell-only export summary.")
-        static let noAction = L10n.string("export.no_action", default: "No real export action")
-        static let noQualitySettings = L10n.string("export.no_quality_settings", default: "No quality settings")
+        static let readyTitle = L10n.string("export.ready_title", default: "Ready To Export")
+        static let readySubtitle = L10n.string("export.ready_subtitle", default: "Choose a destination folder to export redacted copies for the current session.")
+        static let resultsTitle = L10n.string("export.results_title", default: "Last Export Result")
+        static let resultsSubtitle = L10n.string("export.results_subtitle", default: "Latest export result for the current in-memory session.")
+        static let failuresTitle = L10n.string("export.failures_title", default: "Failed Files")
+        static let failuresSubtitle = L10n.string("export.failures_subtitle", default: "These files did not export successfully.")
+        static let noResultsYet = L10n.string("export.no_results_yet", default: "No export has run in this session yet.")
+        static let fixedPDFResolution = L10n.string("export.fixed_pdf_resolution", default: "PDF pages export as rasterized 200 DPI pages")
+        static let localDestinationOnly = L10n.string("export.local_destination_only", default: "Choose a local folder destination with no persistence")
         static let originalUnchanged = L10n.string("export.original_unchanged", default: "Original files remain unchanged")
         static let exportButton = L10n.string("export.export_button", default: "Export Redacted Copy")
+        static let openFolderButton = L10n.string("export.open_folder", default: "Open Output Folder")
+        static let destinationPanelTitle = L10n.string("export.destination_panel.title", default: "Choose Export Folder")
+        static let destinationPanelMessage = L10n.string("export.destination_panel.message", default: "Choose a folder for the current session's redacted copies.")
+        static let destinationPanelPrompt = L10n.string("export.destination_panel.prompt", default: "Choose Folder")
+        static let failureSourceUnavailable = L10n.string("export.failure.source_unavailable", default: "The source file is no longer available.")
+        static let failureImageUnavailable = L10n.string("export.failure.image_unavailable", default: "The image source could not be loaded.")
+        static let failureImageEncodingUnavailable = L10n.string("export.failure.image_encoding_unavailable", default: "The redacted image could not be encoded for export.")
+        static let failurePDFUnavailable = L10n.string("export.failure.pdf_unavailable", default: "The PDF source could not be loaded.")
+        static let failureWriteFailed = L10n.string("export.failure.write_failed", default: "The exported file could not be written to the destination folder.")
+        static let failureDestinationNotDirectory = L10n.string("export.failure.destination_not_directory", default: "The selected destination is not a folder.")
+
+        static func failurePDFPageUnavailable(_ pageNumber: Int) -> String {
+            L10n.formatted(
+                "export.failure.pdf_page_unavailable",
+                default: "PDF page %@ could not be rasterized.",
+                L10n.countText(pageNumber)
+            )
+        }
+
+        static func destinationPath(_ path: String) -> String {
+            L10n.formatted("export.destination_path", default: "Destination: %@", path)
+        }
+
+        static func successCount(_ count: Int) -> String {
+            L10n.formatted("export.success_count", default: "Successful exports: %@", L10n.countText(count))
+        }
+
+        static func failureCount(_ count: Int) -> String {
+            L10n.formatted("export.failure_count", default: "Failed exports: %@", L10n.countText(count))
+        }
     }
 
     enum Services {
         static let fileImportGuidance = L10n.string("service.file_import.guidance", default: "Choose local PDF or image files. They remain in memory for this session only.")
         static let emptyCanvasTitle = L10n.string("service.pdf.canvas_title_empty", default: "Canvas")
-        static let ocrSummary = L10n.string("service.ocr.summary", default: "OCR is not implemented in the current phase.")
-        static let barcodeSummary = L10n.string("service.barcode.summary", default: "Barcode and QR detection are placeholder-only for now.")
+        static let ocrSummary = L10n.string("service.ocr.summary", default: "OCR is not implemented in this V0.")
+        static let barcodeSummary = L10n.string("service.barcode.summary", default: "Barcode and QR detection are not implemented in this V0.")
 
         static func canvasTitle(for pageTitle: String) -> String {
             L10n.formatted("service.pdf.canvas_title", default: "%@ Canvas", pageTitle)
@@ -212,7 +263,7 @@ enum L10n {
         static func maskPreviewSummary(presetTitle: String, regionCount: Int) -> String {
             L10n.formatted(
                 "service.mask.preview_summary",
-                default: "%1$@ will eventually burn %2$@ region(s) into the export copy.",
+                default: "%1$@ will burn %2$@ into masked preview and exported copies.",
                 presetTitle,
                 L10n.Common.regionCount(regionCount)
             )
@@ -221,7 +272,7 @@ enum L10n {
         static func exportSummary(fileCount: Int, presetTitle: String) -> String {
             L10n.formatted(
                 "service.export.summary",
-                default: "Prepared %1$@ file(s) for a future %2$@ export flow.",
+                default: "Ready to export %1$@ with the %2$@ preset.",
                 countText(fileCount),
                 presetTitle
             )

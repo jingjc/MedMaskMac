@@ -228,13 +228,81 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Export is intentionally not implemented in this phase. This page only establishes the shell and the future summary surface."
+            "value" : "Review the current session, export redacted copies to a local folder, and inspect any per-file failures."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "当前阶段刻意不实现导出功能。该页面仅用于建立壳层和未来摘要界面。"
+            "value" : "查看当前会话，向本地文件夹导出脱敏副本，并检查各文件的失败原因。"
+          }
+        }
+      }
+    },
+    "export.destination_panel.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a folder for the current session's redacted copies."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为当前会话的脱敏副本选择一个文件夹。"
+          }
+        }
+      }
+    },
+    "export.destination_panel.prompt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Folder"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择文件夹"
+          }
+        }
+      }
+    },
+    "export.destination_panel.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Export Folder"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择导出文件夹"
+          }
+        }
+      }
+    },
+    "export.destination_path" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Destination: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目标位置：%@"
           }
         }
       }
@@ -256,70 +324,240 @@
         }
       }
     },
-    "export.next_phase_subtitle" : {
-      "extractionState" : "stale",
+    "export.failure.image_encoding_unavailable" : {
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Scope remains fixed to a shell-only export summary."
+            "value" : "The redacted image could not be encoded for export."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "范围仍限定为仅提供壳层的导出摘要。"
+            "value" : "无法将脱敏后的图像编码为导出文件。"
           }
         }
       }
     },
-    "export.next_phase_title" : {
-      "extractionState" : "stale",
+    "export.failure.image_unavailable" : {
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Next Phase Boundary"
+            "value" : "The image source could not be loaded."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "下一阶段边界"
+            "value" : "无法加载图像源文件。"
           }
         }
       }
     },
-    "export.no_action" : {
-      "extractionState" : "stale",
+    "export.failure.pdf_page_unavailable" : {
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No real export action"
+            "value" : "PDF page %@ could not be rasterized."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "无实际导出操作"
+            "value" : "无法栅格化 PDF 第 %@ 页。"
           }
         }
       }
     },
-    "export.no_quality_settings" : {
-      "extractionState" : "stale",
+    "export.failure.pdf_unavailable" : {
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No quality settings"
+            "value" : "The PDF source could not be loaded."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "无质量设置"
+            "value" : "无法加载 PDF 源文件。"
+          }
+        }
+      }
+    },
+    "export.failure.source_unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The source file is no longer available."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "源文件已不可用。"
+          }
+        }
+      }
+    },
+    "export.failure.destination_not_directory" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The selected destination is not a folder."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选目标位置不是文件夹。"
+          }
+        }
+      }
+    },
+    "export.failure.write_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The exported file could not be written to the destination folder."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法将导出文件写入目标文件夹。"
+          }
+        }
+      }
+    },
+    "export.failure_count" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed exports: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失败导出数：%@"
+          }
+        }
+      }
+    },
+    "export.failures_subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "These files did not export successfully."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这些文件未能成功导出。"
+          }
+        }
+      }
+    },
+    "export.failures_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed Files"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失败文件"
+          }
+        }
+      }
+    },
+    "export.fixed_pdf_resolution" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PDF pages export as rasterized 200 DPI pages"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PDF 页面将以 200 DPI 的栅格页面导出"
+          }
+        }
+      }
+    },
+    "export.local_destination_only" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a local folder destination with no persistence"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择本地文件夹作为目标，且不会持久保存会话"
+          }
+        }
+      }
+    },
+    "export.no_results_yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No export has run in this session yet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前会话尚未执行导出。"
+          }
+        }
+      }
+    },
+    "export.open_folder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Output Folder"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开输出文件夹"
           }
         }
       }
@@ -354,6 +592,91 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已准备会话"
+          }
+        }
+      }
+    },
+    "export.ready_subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a destination folder to export redacted copies for the current session."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择目标文件夹，为当前会话导出脱敏副本。"
+          }
+        }
+      }
+    },
+    "export.ready_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ready To Export"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "准备导出"
+          }
+        }
+      }
+    },
+    "export.results_subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Latest export result for the current in-memory session."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前内存会话的最近一次导出结果。"
+          }
+        }
+      }
+    },
+    "export.results_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last Export Result"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近导出结果"
+          }
+        }
+      }
+    },
+    "export.success_count" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Successful exports: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "成功导出数：%@"
           }
         }
       }
@@ -585,13 +908,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Choose local PDF or image files to load them into the current session. OCR, barcode detection, and export remain unimplemented."
+            "value" : "Choose local PDF or image files to load them into the current session. OCR and barcode detection are still out of scope."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "选择本地 PDF 或图像文件并加载到当前会话中。OCR、条码检测和导出仍未实现。"
+            "value" : "选择本地 PDF 或图像文件并加载到当前会话中。OCR 和条码检测仍不在当前范围内。"
           }
         }
       }
@@ -619,13 +942,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Metadata import only. No OCR, barcode scan, or export yet"
+            "value" : "Metadata import only. OCR and barcode scan are still out of scope"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "当前仅导入元数据。尚无 OCR、条码扫描或导出。"
+            "value" : "当前仅导入元数据。OCR 和条码扫描仍不在当前范围内。"
           }
         }
       }
@@ -738,13 +1061,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Review the shell of the final redaction handoff."
+            "value" : "Review export results for the current session and open the output folder."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "查看最终脱敏交付流程的壳层界面。"
+            "value" : "查看当前会话的导出结果并打开输出文件夹。"
           }
         }
       }
@@ -806,13 +1129,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Inspect page structure before masking and export are implemented."
+            "value" : "Review pages, place manual masks, and prepare the current session for export."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在实现遮罩和导出前检查页面结构。"
+            "value" : "检查页面、放置手动遮罩，并为当前会话准备导出。"
           }
         }
       }
@@ -891,13 +1214,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Reserved for future manual redaction controls."
+            "value" : "Use when you want to manage manual regions directly."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "预留给后续手动脱敏控制功能。"
+            "value" : "当你希望直接管理手动区域时使用。"
           }
         }
       }
@@ -1005,18 +1328,18 @@
       }
     },
     "review.canvas.delete_region" : {
-      "extractionState" : "stale",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Delete Selected Region"
+            "value" : "Delete Selected Box"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "删除所选区域"
+            "value" : "删除选中框"
           }
         }
       }
@@ -1034,6 +1357,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在空白预览区域拖拽可创建区域。按 Delete 可删除当前选中的框。"
+          }
+        }
+      }
+    },
+    "review.canvas.masked_preview" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Masked Preview"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "脱敏预览"
+          }
+        }
+      }
+    },
+    "review.canvas.masked_preview_hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Masked preview is view-only. Switch back to Original to edit boxes."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "脱敏预览仅供查看。切回原始视图后才能编辑框。"
           }
         }
       }
@@ -1072,6 +1429,23 @@
         }
       }
     },
+    "review.canvas.original_preview" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Original"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原始"
+          }
+        }
+      }
+    },
     "review.canvas.preview_load_failed" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1085,6 +1459,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法加载 \"%@\" 的预览。"
+          }
+        }
+      }
+    },
+    "review.canvas.preview_mode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preview Mode"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "预览模式"
           }
         }
       }
@@ -1157,19 +1548,138 @@
         }
       }
     },
+    "review.command.menu_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Review"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "审核"
+          }
+        }
+      }
+    },
+    "review.command.next_page" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next Page"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下一页"
+          }
+        }
+      }
+    },
+    "review.command.previous_page" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Previous Page"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上一页"
+          }
+        }
+      }
+    },
+    "review.command.redo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redo"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重做"
+          }
+        }
+      }
+    },
+    "review.command.show_masked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Masked Preview"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示脱敏预览"
+          }
+        }
+      }
+    },
+    "review.command.show_original" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Original"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示原始视图"
+          }
+        }
+      }
+    },
+    "review.command.undo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undo"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "撤销"
+          }
+        }
+      }
+    },
     "review.inspector.detection_subtitle" : {
       "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Service placeholders only. No OCR or barcode pass runs yet."
+            "value" : "OCR and barcode services are not part of this V0."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "目前仅为服务占位，尚未执行 OCR 或条码检测。"
+            "value" : "OCR 和条码服务不属于当前 V0 范围。"
           }
         }
       }
@@ -1214,13 +1724,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Right-side placeholder for mask settings and page details."
+            "value" : "Mask settings and current-session region counts for the selected file."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "右侧用于遮罩设置和页面详情的占位区域。"
+            "value" : "所选文件的遮罩设置与当前会话区域计数。"
           }
         }
       }
@@ -1344,19 +1854,36 @@
         }
       }
     },
+    "review.sidebar.single_page_metadata" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Single page • %1$@ • %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "单页 • %1$@ • %2$@"
+          }
+        }
+      }
+    },
     "service.barcode.summary" : {
       "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Barcode and QR detection are placeholder-only for now."
+            "value" : "Barcode and QR detection are not implemented in this V0."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "条码和二维码检测目前仅为占位。"
+            "value" : "条码和二维码检测未在当前 V0 中实现。"
           }
         }
       }
@@ -1367,13 +1894,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Prepared %1$@ file(s) for a future %2$@ export flow."
+            "value" : "Ready to export %1$@ with the %2$@ preset."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已为未来的%2$@导出流程准备%1$@个文件。"
+            "value" : "已准备使用 %2$@ 预设导出 %1$@。"
           }
         }
       }
@@ -1418,13 +1945,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@ will eventually burn %2$@ into the export copy."
+            "value" : "%1$@ will burn %2$@ into masked preview and exported copies."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@ 最终会将 %2$@ 烧录进导出副本。"
+            "value" : "%1$@ 会将 %2$@ 烧录到脱敏预览和导出副本中。"
           }
         }
       }
@@ -1435,13 +1962,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "OCR is not implemented in the current phase."
+            "value" : "OCR is not implemented in this V0."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "当前阶段未实现 OCR。"
+            "value" : "当前 V0 未实现 OCR。"
           }
         }
       }

@@ -4,9 +4,12 @@ struct DocumentPreviewView: View {
     let content: DocumentPreviewContent
     let regions: [SensitiveRegion]
     let selectedRegionID: SensitiveRegion.ID?
+    let isEditingEnabled: Bool
     let onSelectRegion: (SensitiveRegion.ID?) -> Void
     let onCreateRegion: (NormalizedRect) -> Void
     let onUpdateRegion: (SensitiveRegion.ID, NormalizedRect) -> Void
+    let onEditTransactionBegan: () -> Void
+    let onEditTransactionEnded: () -> Void
 
     private let previewCornerRadius: CGFloat = 24
     private let previewPadding: CGFloat = 16
@@ -78,14 +81,18 @@ struct DocumentPreviewView: View {
                     .interpolation(.high)
                     .allowsHitTesting(false)
 
-                RegionEditorOverlayView(
-                    contentSize: fittedSize,
-                    regions: regions,
-                    selectedRegionID: selectedRegionID,
-                    onSelectRegion: onSelectRegion,
-                    onCreateRegion: onCreateRegion,
-                    onUpdateRegion: onUpdateRegion
-                )
+                if isEditingEnabled {
+                    RegionEditorOverlayView(
+                        contentSize: fittedSize,
+                        regions: regions,
+                        selectedRegionID: selectedRegionID,
+                        onSelectRegion: onSelectRegion,
+                        onCreateRegion: onCreateRegion,
+                        onUpdateRegion: onUpdateRegion,
+                        onEditTransactionBegan: onEditTransactionBegan,
+                        onEditTransactionEnded: onEditTransactionEnded
+                    )
+                }
             }
             .frame(width: fittedSize.width, height: fittedSize.height)
             .clipped()

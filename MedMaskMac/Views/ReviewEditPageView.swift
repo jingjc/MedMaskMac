@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ReviewEditPageView: View {
     @ObservedObject var viewModel: AppViewModel
+    @FocusState private var isPreviewFocused: Bool
+
     private let sidebarWidth: CGFloat = 290
     private let inspectorWidth: CGFloat = 320
 
@@ -25,8 +27,15 @@ struct ReviewEditPageView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()
-        .onDeleteCommand {
-            viewModel.deleteSelectedRegion()
+        .onMoveCommand { direction in
+            switch direction {
+            case .left:
+                viewModel.goToPreviousPage()
+            case .right:
+                viewModel.goToNextPage()
+            default:
+                break
+            }
         }
     }
 
@@ -54,6 +63,12 @@ struct ReviewEditPageView: View {
                                             Text(viewModel.fileSummary(for: file))
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
+                                            if file.id == viewModel.selectedFileID,
+                                               let metadata = viewModel.selectedSinglePageSidebarMetadata {
+                                                Text(metadata)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
                                         }
 
                                         Spacer()
@@ -70,39 +85,41 @@ struct ReviewEditPageView: View {
                     }
                 }
 
-                PanelCard(
-                    title: L10n.Review.pagesTitle,
-                    subtitle: L10n.Review.pagesSubtitle
-                ) {
-                    if let pages = viewModel.selectedFile?.pages, !pages.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(pages) { page in
-                                Button {
-                                    viewModel.selectPage(page.id)
-                                } label: {
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text(page.title)
-                                                .font(.headline)
-                                            Text(viewModel.pageSummary(for: page))
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
+                if viewModel.shouldShowPagesCard {
+                    PanelCard(
+                        title: L10n.Review.pagesTitle,
+                        subtitle: L10n.Review.pagesSubtitle
+                    ) {
+                        if let pages = viewModel.selectedFile?.pages, !pages.isEmpty {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(pages) { page in
+                                    Button {
+                                        viewModel.selectPage(page.id)
+                                    } label: {
+                                        HStack {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(page.title)
+                                                    .font(.headline)
+                                                Text(viewModel.pageSummary(for: page))
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
 
-                                        Spacer()
-                                        StatusBadge(text: page.status.displayTitle)
+                                            Spacer()
+                                            StatusBadge(text: page.status.displayTitle)
+                                        }
+                                        .padding(12)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(page.id == viewModel.selectedPageID ? Color.accentColor.opacity(0.10) : Color.clear)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                     }
-                                    .padding(12)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(page.id == viewModel.selectedPageID ? Color.accentColor.opacity(0.10) : Color.clear)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
                             }
+                        } else {
+                            Text(L10n.Review.noPagesAvailable)
+                                .foregroundStyle(.secondary)
                         }
-                    } else {
-                        Text(L10n.Review.noPagesAvailable)
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -121,19 +138,67 @@ struct ReviewEditPageView: View {
                     subtitle: L10n.Review.canvasSubtitle
                 ) {
                     VStack(spacing: 18) {
+                        HStack(spacing: 12) {
+                            Picker(L10n.Review.previewMode, selection: $viewModel.previewDisplayMode) {
+                                ForEach(ReviewPreviewMode.allCases) { mode in
+                                    Text(mode.title).tag(mode)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 280)
+                            .disabled(!viewModel.hasImportedFiles)
+
+                            Spacer()
+
+                            Button(L10n.Review.undo) {
+                                viewModel.undoCurrentPageEdit()
+                            }
+                            .disabled(!viewModel.isEditingEnabled || !viewModel.canUndoCurrentPageEdit)
+
+                            Button(L10n.Review.redo) {
+                                viewModel.redoCurrentPageEdit()
+                            }
+                            .disabled(!viewModel.isEditingEnabled || !viewModel.canRedoCurrentPageEdit)
+
+                            Button(L10n.Export.exportButton) {
+                                viewModel.beginExportFlow()
+                            }
+                            .disabled(!viewModel.canBeginExportFlow)
+                        }
+
                         DocumentPreviewView(
                             content: viewModel.previewContent,
-                            regions: viewModel.selectedPageRegions,
+                            regions: viewModel.displayedPreviewRegions,
                             selectedRegionID: viewModel.selectedRegionID,
-                            onSelectRegion: viewModel.selectRegion,
-                            onCreateRegion: viewModel.createRegion(with:),
-                            onUpdateRegion: viewModel.updateRegion
+                            isEditingEnabled: viewModel.isEditingEnabled,
+                            onSelectRegion: selectPreviewRegion,
+                            onCreateRegion: createPreviewRegion,
+                            onUpdateRegion: updatePreviewRegion,
+                            onEditTransactionBegan: viewModel.beginPageEditTransaction,
+                            onEditTransactionEnded: viewModel.endPageEditTransaction
                         )
+                        .focusable()
+                        .focused($isPreviewFocused)
+                        .onDeleteCommand {
+                            viewModel.deleteSelectedRegion()
+                        }
 
                         HStack {
                             Label(viewModel.selectedFileDisplayLabel, systemImage: "doc.text")
                             Spacer()
                             Label(viewModel.selectedPageDisplayLabel, systemImage: "doc.plaintext")
+                            Spacer()
+                            HStack(spacing: 8) {
+                                Button(L10n.Review.previousPage) {
+                                    viewModel.goToPreviousPage()
+                                }
+                                .disabled(!viewModel.canGoToPreviousPage)
+
+                                Button(L10n.Review.nextPage) {
+                                    viewModel.goToNextPage()
+                                }
+                                .disabled(!viewModel.canGoToNextPage)
+                            }
                         }
                         .foregroundStyle(.secondary)
 
@@ -149,7 +214,7 @@ struct ReviewEditPageView: View {
                         .foregroundStyle(.secondary)
 
                         HStack {
-                            Text(L10n.Review.manualEditHint)
+                            Text(viewModel.isEditingEnabled ? L10n.Review.manualEditHint : L10n.Review.maskedPreviewHint)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
 
@@ -160,8 +225,7 @@ struct ReviewEditPageView: View {
                             } label: {
                                 Label(L10n.Review.deleteRegion, systemImage: "trash")
                             }
-                            .keyboardShortcut(.delete, modifiers: [])
-                            .disabled(!viewModel.hasSelectedRegion)
+                            .disabled(!viewModel.canDeleteSelectedRegion)
                         }
                     }
                 }
@@ -212,5 +276,20 @@ struct ReviewEditPageView: View {
             }
             .padding(20)
         }
+    }
+
+    private func selectPreviewRegion(_ regionID: SensitiveRegion.ID?) {
+        viewModel.selectRegion(regionID)
+        isPreviewFocused = true
+    }
+
+    private func createPreviewRegion(with bounds: NormalizedRect) {
+        viewModel.createRegion(with: bounds)
+        isPreviewFocused = true
+    }
+
+    private func updatePreviewRegion(_ regionID: SensitiveRegion.ID, _ bounds: NormalizedRect) {
+        viewModel.updateRegion(regionID, bounds: bounds)
+        isPreviewFocused = true
     }
 }
