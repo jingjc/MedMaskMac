@@ -156,8 +156,8 @@ enum L10n {
         static let pagesSubtitle = L10n.string("review.sidebar.pages_subtitle", default: "Pages discovered from the selected file.")
         static let noPagesAvailable = L10n.string("review.sidebar.no_pages", default: "Select a file to view its pages.")
         static let canvasSectionTitle = L10n.string("review.canvas.title", default: "Canvas")
-        static let canvasSubtitle = L10n.string("review.canvas.subtitle", default: "Canvas rendering is still a placeholder. Selected file and page metadata are shown below.")
-        static let canvasPreviewPlaceholder = L10n.string("review.canvas.preview_placeholder", default: "Page preview will render here in a later phase.")
+        static let canvasSubtitle = L10n.string("review.canvas.subtitle", default: "Actual preview is shown here for imported images and PDF pages.")
+        static let canvasPreviewPlaceholder = L10n.string("review.canvas.preview_placeholder", default: "Select a file and page to preview.")
         static let noFileSelected = L10n.string("review.canvas.no_file", default: "No file selected")
         static let noPageSelected = L10n.string("review.canvas.no_page", default: "No page selected")
         static let inspectorTitle = L10n.string("review.inspector.title", default: "Inspector")
@@ -165,6 +165,24 @@ enum L10n {
         static let maskPreset = L10n.string("review.inspector.mask_preset", default: "Mask Preset")
         static let detectionTitle = L10n.string("review.inspector.detection_title", default: "Detection Status")
         static let detectionSubtitle = L10n.string("review.inspector.detection_subtitle", default: "Service placeholders only. No OCR or barcode pass runs yet.")
+
+        static var previewUnavailable: String {
+            L10n.string("review.canvas.preview_unavailable", default: "Preview unavailable for the selected content.")
+        }
+
+        static func previewLoadFailed(_ fileName: String) -> String {
+            L10n.formatted("review.canvas.preview_load_failed", default: "Could not load a preview for \"%@\".", fileName)
+        }
+
+        static func previewMetadata(kind: String, pageNumber: Int, pageCount: Int) -> String {
+            L10n.formatted(
+                "review.canvas.preview_metadata",
+                default: "%1$@ • Page %2$@ of %3$@",
+                kind,
+                L10n.countText(pageNumber),
+                L10n.countText(pageCount)
+            )
+        }
     }
 
     enum Export {

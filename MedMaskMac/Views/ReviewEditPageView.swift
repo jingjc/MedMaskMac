@@ -106,18 +106,7 @@ struct ReviewEditPageView: View {
                 subtitle: L10n.Review.canvasSubtitle
             ) {
                 VStack(spacing: 18) {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(Color(nsColor: .underPageBackgroundColor))
-                        .overlay {
-                            VStack(spacing: 12) {
-                                Image(systemName: "doc.viewfinder")
-                                    .font(.system(size: 42))
-                                    .foregroundStyle(.secondary)
-                                Text(L10n.Review.canvasPreviewPlaceholder)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 480)
+                    DocumentPreviewView(content: viewModel.previewContent)
 
                     HStack {
                         Label(viewModel.selectedFileDisplayLabel, systemImage: "doc.text")
@@ -126,10 +115,10 @@ struct ReviewEditPageView: View {
                     }
                     .foregroundStyle(.secondary)
 
-                    if let selectedFileMetadataSummary = viewModel.selectedFileMetadataSummary,
+                    if let selectedPreviewMetadataSummary = viewModel.selectedPreviewMetadataSummary,
                        let selectedPageStatusSummary = viewModel.selectedPageStatusSummary {
                         HStack {
-                            Text(selectedFileMetadataSummary)
+                            Text(selectedPreviewMetadataSummary)
                             Spacer()
                             Text(selectedPageStatusSummary)
                         }

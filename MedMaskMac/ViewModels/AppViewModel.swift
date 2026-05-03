@@ -16,11 +16,12 @@ final class AppViewModel: ObservableObject {
     private let barcodeService: any BarcodeService
     private let maskComposeService: any MaskComposeService
     private let exportService: any ExportService
+    private var lastSelectedPageByFileID: [FileItem.ID: PageItem.ID] = [:]
 
     init() {
         self.files = []
         self.fileImportService = DefaultFileImportService()
-        self.pdfRenderService = PlaceholderPDFRenderService()
+        self.pdfRenderService = DefaultPDFRenderService()
         self.ocrService = PlaceholderOCRService()
         self.barcodeService = PlaceholderBarcodeService()
         self.maskComposeService = PlaceholderMaskComposeService()
@@ -47,6 +48,10 @@ final class AppViewModel: ObservableObject {
 
     var canvasTitle: String {
         pdfRenderService.canvasTitle(for: selectedDocumentPage)
+    }
+
+    var previewContent: DocumentPreviewContent {
+        pdfRenderService.previewContent(for: selectedFile, page: selectedDocumentPage)
     }
 
     var ocrSummary: String {
@@ -131,6 +136,18 @@ final class AppViewModel: ObservableObject {
         return fileSummary(for: selectedFile)
     }
 
+    var selectedPreviewMetadataSummary: String? {
+        guard let selectedFile, let selectedDocumentPage else {
+            return nil
+        }
+
+        return L10n.Review.previewMetadata(
+            kind: selectedFile.kind.displayTitle,
+            pageNumber: selectedDocumentPage.pageNumber,
+            pageCount: selectedFile.pageCount
+        )
+    }
+
     var selectedPageStatusSummary: String? {
         selectedDocumentPage?.status.displayTitle
     }
@@ -157,10 +174,11 @@ final class AppViewModel: ObservableObject {
             files.append(contentsOf: importedFiles)
 
             if shouldSelectImportedContent, let firstImportedFile = importedFiles.first {
-                selectedFileID = firstImportedFile.id
-                selectedPageID = firstImportedFile.pages.first?.id
+                applySelection(for: firstImportedFile, preferredPageID: firstImportedFile.pages.first?.id)
             } else if selectedPageID == nil {
-                selectedPageID = selectedFile?.pages.first?.id
+                if let selectedFile {
+                    applySelection(for: selectedFile, preferredPageID: selectedFile.pages.first?.id)
+                }
             }
         } catch {
             importErrorMessage = error.localizedDescription
@@ -173,19 +191,43 @@ final class AppViewModel: ObservableObject {
         }
 
         if selectedFile == nil, let firstFile = files.first {
-            selectedFileID = firstFile.id
-            selectedPageID = firstFile.pages.first?.id
+            applySelection(for: firstFile, preferredPageID: firstFile.pages.first?.id)
         }
 
         selectedPage = .reviewEdit
     }
 
     func selectFile(_ fileID: FileItem.ID) {
-        selectedFileID = fileID
-        selectedPageID = files.first { $0.id == fileID }?.pages.first?.id
+        guard let file = files.first(where: { $0.id == fileID }) else {
+            return
+        }
+
+        let preferredPageID = lastSelectedPageByFileID[fileID] ?? file.pages.first?.id
+        applySelection(for: file, preferredPageID: preferredPageID)
     }
 
     func selectPage(_ pageID: PageItem.ID) {
         selectedPageID = pageID
+
+        if let selectedFileID {
+            lastSelectedPageByFileID[selectedFileID] = pageID
+        }
+    }
+
+    private func applySelection(for file: FileItem, preferredPageID: PageItem.ID?) {
+        selectedFileID = file.id
+        selectedPageID = resolvedPageID(in: file, preferredPageID: preferredPageID)
+
+        if let selectedPageID {
+            lastSelectedPageByFileID[file.id] = selectedPageID
+        }
+    }
+
+    private func resolvedPageID(in file: FileItem, preferredPageID: PageItem.ID?) -> PageItem.ID? {
+        if let preferredPageID, file.pages.contains(where: { $0.id == preferredPageID }) {
+            return preferredPageID
+        }
+
+        return file.pages.first?.id
     }
 }

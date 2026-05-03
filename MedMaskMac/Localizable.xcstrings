@@ -1027,13 +1027,64 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Page preview will render here in a later phase."
+            "value" : "Select a file and page to preview."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "后续阶段会在此处渲染页面预览。"
+            "value" : "选择一个文件和页面以进行预览。"
+          }
+        }
+      }
+    },
+    "review.canvas.preview_load_failed" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not load a preview for \"%@\"."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法加载 \"%@\" 的预览。"
+          }
+        }
+      }
+    },
+    "review.canvas.preview_metadata" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ • Page %2$@ of %3$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ • 第 %2$@ / %3$@ 页"
+          }
+        }
+      }
+    },
+    "review.canvas.preview_unavailable" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preview unavailable for the selected content."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选内容暂时无法预览。"
           }
         }
       }
@@ -1044,13 +1095,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Canvas rendering is still a placeholder. Selected file and page metadata are shown below."
+            "value" : "Actual preview is shown here for imported images and PDF pages."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "画布渲染仍为占位。下方会显示所选文件和页面的元数据。"
+            "value" : "这里会显示已导入图像和 PDF 页面的真实预览。"
           }
         }
       }
