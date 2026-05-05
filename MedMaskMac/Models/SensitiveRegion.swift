@@ -68,31 +68,66 @@ struct NormalizedRect: Hashable {
             height: clampedHeight
         )
     }
+
+    func padded(horizontal: Double, vertical: Double) -> NormalizedRect {
+        NormalizedRect(
+            x: x - horizontal,
+            y: y - vertical,
+            width: width + horizontal * 2,
+            height: height + vertical * 2
+        )
+        .clamped()
+    }
+
+    func substantiallyOverlaps(_ other: NormalizedRect, threshold: Double = 0.55) -> Bool {
+        let intersectionWidth = max(0, min(x + width, other.x + other.width) - max(x, other.x))
+        let intersectionHeight = max(0, min(y + height, other.y + other.height) - max(y, other.y))
+        let intersectionArea = intersectionWidth * intersectionHeight
+        let smallerArea = min(width * height, other.width * other.height)
+
+        guard smallerArea > 0 else {
+            return false
+        }
+
+        return intersectionArea / smallerArea >= threshold
+    }
 }
 
 enum SensitiveRegionKind: String, CaseIterable, Hashable {
     case name = "Name"
     case phoneNumber = "Phone Number"
-    case idNumber = "ID Number"
+    case chineseIDNumber = "Chinese ID Number"
+    case medicalNumber = "Medical Number"
     case barcode = "Barcode / QR"
-    case freeform = "Freeform"
+    case custom = "Custom"
+}
+
+enum SensitiveRegionSource: String, CaseIterable, Hashable {
+    case manual = "Manual"
+    case ocr = "OCR"
 }
 
 struct SensitiveRegion: Identifiable, Hashable {
     let id: UUID
     var kind: SensitiveRegionKind
+    var source: SensitiveRegionSource
     var bounds: NormalizedRect
+    var confidence: Double?
     var isMasked: Bool
 
     init(
         id: UUID = UUID(),
         kind: SensitiveRegionKind,
+        source: SensitiveRegionSource = .manual,
         bounds: NormalizedRect,
+        confidence: Double? = nil,
         isMasked: Bool = false
     ) {
         self.id = id
         self.kind = kind
+        self.source = source
         self.bounds = bounds
+        self.confidence = confidence
         self.isMasked = isMasked
     }
 }

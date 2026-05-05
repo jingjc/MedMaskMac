@@ -62,16 +62,30 @@ enum L10n {
     enum PageStatus {
         static let pendingDetection = L10n.string("page_status.pending_detection", default: "Pending Detection")
         static let readyForReview = L10n.string("page_status.ready_for_review", default: "Ready For Review")
-        static let maskedPreview = L10n.string("page_status.masked_preview", default: "Masked Preview")
+        static let maskedPreview = L10n.string("page_status.masked_preview", default: "Preview")
     }
 
     enum Preset {
         static let standardTitle = L10n.string("preset.standard.title", default: "Standard Redaction")
-        static let standardSummary = L10n.string("preset.standard.summary", default: "Balanced default for common medical report cleanup.")
+        static let standardSummary = L10n.string("preset.standard.summary", default: "Detect name, phone number, ID number, outpatient number, inpatient number, medical record number, and other core identity fields.")
         static let strictTitle = L10n.string("preset.strict.title", default: "Strict Redaction")
-        static let strictSummary = L10n.string("preset.strict.summary", default: "Wider masking intended for conservative review.")
+        static let strictSummary = L10n.string("preset.strict.summary", default: "Adds demographics, dates, contact, facility, doctor, and bed information.")
         static let customTitle = L10n.string("preset.custom.title", default: "Custom Redaction")
-        static let customSummary = L10n.string("preset.custom.summary", default: "Use when you want to manage manual regions directly.")
+        static let customSummary = L10n.string("preset.custom.summary", default: "Uses the enabled checklist fields for OCR suggestions.")
+    }
+
+    enum CustomField {
+        static let name = L10n.string("preset.custom.field.name", default: "Name")
+        static let phone = L10n.string("preset.custom.field.phone", default: "Phone")
+        static let idNumber = L10n.string("preset.custom.field.id_number", default: "ID Number")
+        static let medicalNumbers = L10n.string("preset.custom.field.medical_numbers", default: "Medical Numbers")
+        static let sex = L10n.string("preset.custom.field.sex", default: "Gender")
+        static let age = L10n.string("preset.custom.field.age", default: "Age")
+        static let dates = L10n.string("preset.custom.field.dates", default: "Dates")
+        static let address = L10n.string("preset.custom.field.address", default: "Address")
+        static let email = L10n.string("preset.custom.field.email", default: "Email")
+        static let hospitalDepartment = L10n.string("preset.custom.field.hospital_department", default: "Hospital/Department")
+        static let doctor = L10n.string("preset.custom.field.doctor", default: "Doctor")
     }
 
     enum Common {
@@ -114,10 +128,10 @@ enum L10n {
 
     enum Import {
         static let title = L10n.string("import.title", default: "Import Page")
-        static let description = L10n.string("import.description", default: "Choose local PDF or image files to load them into the current session. OCR and barcode detection are still out of scope.")
+        static let description = L10n.string("import.description", default: "Choose local PDF or image files to load them into the current session.")
         static let actionTitle = L10n.string("import.card.title", default: "Import Files")
         static let localFirst = L10n.string("import.local_first", default: "Local-only session")
-        static let noBackground = L10n.string("import.no_background", default: "Metadata import only. OCR and barcode scan are still out of scope")
+        static let noBackground = L10n.string("import.no_background", default: "Current-page OCR runs only when requested")
         static let chooseFiles = L10n.string("import.choose_files", default: "Choose Files")
         static let goToReview = L10n.string("import.go_to_review", default: "Go to Review / Edit")
         static let importedFilesTitle = L10n.string("import.card.session_seed_title", default: "Imported Files")
@@ -160,15 +174,36 @@ enum L10n {
         static let inspectorSubtitle = L10n.string("review.inspector.subtitle", default: "Mask settings and current-session region counts for the selected file.")
         static let maskPreset = L10n.string("review.inspector.mask_preset", default: "Mask Preset")
         static let detectionTitle = L10n.string("review.inspector.detection_title", default: "Detection Status")
-        static let detectionSubtitle = L10n.string("review.inspector.detection_subtitle", default: "OCR and barcode services are not part of this V0.")
+        static let detectionSubtitle = L10n.string("review.inspector.detection_subtitle", default: "Run local OCR suggestions for the selected page only.")
+        static let detectCurrentPage = L10n.string("review.ocr.detect_current_page", default: "Detect Current Page")
+        static let ocrDetectedItemsTitle = L10n.string("review.ocr.detected_items_title", default: "Detected Items")
+        static let maskOCRCandidate = L10n.string("review.ocr.action.mask", default: "Mask")
+        static let ignoreOCRCandidate = L10n.string("review.ocr.action.ignore", default: "Ignore")
+        static let locateOCRCandidate = L10n.string("review.ocr.action.locate", default: "Locate")
+        static let undoOCRCandidate = L10n.string("review.ocr.action.undo", default: "Undo")
+        static let unmaskOCRCandidate = L10n.string("review.ocr.action.unmask", default: "Unmask")
+        static let ocrCandidateStatusPending = L10n.string("review.ocr.status.pending", default: "Pending")
+        static let ocrCandidateStatusMasked = L10n.string("review.ocr.status.masked", default: "Masked")
+        static let ocrCandidateStatusIgnored = L10n.string("review.ocr.status.ignored", default: "Ignored")
+        static let ocrNoCandidates = L10n.string("review.ocr.no_candidates", default: "No sensitive items detected")
+        static let ocrNoExplicitValue = L10n.string("review.ocr.no_explicit_value", default: "No specific content recognized. Please check this fill-in area.")
+        static let ocrStateIdle = L10n.string("review.ocr.state.idle", default: "Idle")
+        static let ocrStateRunning = L10n.string("review.ocr.state.running", default: "Detecting current page...")
+        static let ocrStateNeedsRerun = L10n.string("review.ocr.state.needs_rerun", default: "OCR options changed. Run OCR again.")
+        static let ocrStateNoPage = L10n.string("review.ocr.state.no_page", default: "Select a file and page first.")
+        static let ocrSuggestionHint = L10n.string("review.ocr.suggestion_hint", default: "OCR suggestions are normal editable boxes on the selected page.")
         static let manualEditHint = L10n.string("review.canvas.manual_edit_hint", default: "Drag on empty preview space to create a region. Delete removes the selected box.")
-        static let maskedPreviewHint = L10n.string("review.canvas.masked_preview_hint", default: "Masked preview is view-only. Switch back to Original to edit boxes.")
+        static let maskedPreviewHint = L10n.string("review.canvas.masked_preview_hint", default: "Preview is view-only. Switch back to Edit to edit boxes.")
         static let deleteRegion = L10n.string("review.canvas.delete_region", default: "Delete Selected Box")
         static let previewMode = L10n.string("review.canvas.preview_mode", default: "Preview Mode")
-        static let originalPreview = L10n.string("review.canvas.original_preview", default: "Original")
-        static let maskedPreview = L10n.string("review.canvas.masked_preview", default: "Masked Preview")
-        static let showOriginalPreview = L10n.string("review.command.show_original", default: "Show Original")
-        static let showMaskedPreview = L10n.string("review.command.show_masked", default: "Show Masked Preview")
+        static let originalPreview = L10n.string("review.canvas.original_preview", default: "Edit")
+        static let maskedPreview = L10n.string("review.canvas.masked_preview", default: "Preview")
+        static let fitToWindow = L10n.string("review.canvas.zoom.fit_to_window", default: "Fit to Window")
+        static let fitToWidth = L10n.string("review.canvas.zoom.fit_to_width", default: "Fit to Width")
+        static let actualSize = L10n.string("review.canvas.zoom.actual_size", default: "Actual Size")
+        static let customPresetFieldsTitle = L10n.string("review.inspector.custom_preset_fields", default: "Custom Fields")
+        static let showOriginalPreview = L10n.string("review.command.show_original", default: "Show Edit")
+        static let showMaskedPreview = L10n.string("review.command.show_masked", default: "Show Preview")
         static let undo = L10n.string("review.command.undo", default: "Undo")
         static let redo = L10n.string("review.command.redo", default: "Redo")
         static let previousPage = L10n.string("review.command.previous_page", default: "Previous Page")
@@ -201,6 +236,36 @@ enum L10n {
                 status
             )
         }
+
+        static func ocrStateSucceeded(_ count: Int) -> String {
+            L10n.formatted("review.ocr.state.succeeded", default: "Detected %d candidate item(s) on this page.", count)
+        }
+
+        static func ocrStateFailed(_ reason: String) -> String {
+            L10n.formatted("review.ocr.state.failed", default: "OCR failed: %@", reason)
+        }
+    }
+
+    enum OCRCategory {
+        static let name = L10n.string("ocr.category.name", default: "Name")
+        static let sex = L10n.string("ocr.category.sex", default: "Sex")
+        static let age = L10n.string("ocr.category.age", default: "Age")
+        static let address = L10n.string("ocr.category.address", default: "Address")
+        static let phone = L10n.string("ocr.category.phone", default: "Phone")
+        static let email = L10n.string("ocr.category.email", default: "Email")
+        static let fax = L10n.string("ocr.category.fax", default: "Fax")
+        static let chineseID = L10n.string("ocr.category.chinese_id", default: "Chinese ID")
+        static let documentNumber = L10n.string("ocr.category.document_number", default: "Document Number")
+        static let medicalNumber = L10n.string("ocr.category.medical_number", default: "Medical Number")
+        static let hospital = L10n.string("ocr.category.hospital", default: "Hospital")
+        static let department = L10n.string("ocr.category.department", default: "Department")
+        static let doctor = L10n.string("ocr.category.doctor", default: "Doctor")
+        static let bedNumber = L10n.string("ocr.category.bed_number", default: "Bed Number")
+        static let date = L10n.string("ocr.category.date", default: "Date")
+        static let birthday = L10n.string("ocr.category.birthday", default: "Birthday")
+        static let examDate = L10n.string("ocr.category.exam_date", default: "Exam Date")
+        static let custom = L10n.string("ocr.category.custom", default: "Custom")
+        static let unknown = L10n.string("ocr.category.unknown", default: "Unknown")
     }
 
     enum Export {
@@ -253,8 +318,9 @@ enum L10n {
     enum Services {
         static let fileImportGuidance = L10n.string("service.file_import.guidance", default: "Choose local PDF or image files. They remain in memory for this session only.")
         static let emptyCanvasTitle = L10n.string("service.pdf.canvas_title_empty", default: "Canvas")
-        static let ocrSummary = L10n.string("service.ocr.summary", default: "OCR is not implemented in this V0.")
+        static let ocrSummary = L10n.string("service.ocr.summary", default: "Local Vision OCR is available for current-page suggestions.")
         static let barcodeSummary = L10n.string("service.barcode.summary", default: "Barcode and QR detection are not implemented in this V0.")
+        static let ocrFailureSourceUnavailable = L10n.string("service.ocr.failure.source_unavailable", default: "The source file is no longer available.")
 
         static func canvasTitle(for pageTitle: String) -> String {
             L10n.formatted("service.pdf.canvas_title", default: "%@ Canvas", pageTitle)
@@ -263,7 +329,7 @@ enum L10n {
         static func maskPreviewSummary(presetTitle: String, regionCount: Int) -> String {
             L10n.formatted(
                 "service.mask.preview_summary",
-                default: "%1$@ will burn %2$@ into masked preview and exported copies.",
+                default: "%1$@ will burn %2$@ into preview and exported copies.",
                 presetTitle,
                 L10n.Common.regionCount(regionCount)
             )
@@ -276,6 +342,22 @@ enum L10n {
                 countText(fileCount),
                 presetTitle
             )
+        }
+
+        static func ocrFailureImageUnavailable(_ fileName: String) -> String {
+            L10n.formatted("service.ocr.failure.image_unavailable", default: "The image \"%@\" could not be prepared for OCR.", fileName)
+        }
+
+        static func ocrFailurePDFUnavailable(_ fileName: String) -> String {
+            L10n.formatted("service.ocr.failure.pdf_unavailable", default: "The PDF \"%@\" could not be prepared for OCR.", fileName)
+        }
+
+        static func ocrFailurePDFPageUnavailable(_ pageNumber: Int) -> String {
+            L10n.formatted("service.ocr.failure.pdf_page_unavailable", default: "PDF page %@ could not be prepared for OCR.", countText(pageNumber))
+        }
+
+        static func ocrFailureRecognitionFailed(_ reason: String) -> String {
+            L10n.formatted("service.ocr.failure.recognition_failed", default: "Vision text recognition failed. %@", reason)
         }
     }
 }

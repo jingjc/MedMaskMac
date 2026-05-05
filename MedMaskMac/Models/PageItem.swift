@@ -3,7 +3,7 @@ import Foundation
 enum PageProcessingStatus: String, CaseIterable, Hashable {
     case pendingDetection = "Pending Detection"
     case readyForReview = "Ready For Review"
-    case maskedPreview = "Masked Preview"
+    case maskedPreview = "Preview"
 
     var displayTitle: String {
         switch self {

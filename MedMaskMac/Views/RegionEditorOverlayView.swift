@@ -14,7 +14,8 @@ struct RegionEditorOverlayView: View {
     @State private var moveSession: RegionMoveSession?
     @State private var resizeSession: RegionResizeSession?
 
-    private let minimumRegionLength: CGFloat = 20
+    private let minimumRegionWidth: CGFloat = 12
+    private let minimumRegionHeight: CGFloat = 8
     private let handleDiameter: CGFloat = 12
     private let handleHitDiameter: CGFloat = 30
 
@@ -73,11 +74,11 @@ struct RegionEditorOverlayView: View {
 
         return ZStack {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.black.opacity(0.10))
+                .fill(fillColor(for: region, isSelected: isSelected))
 
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(
-                    isSelected ? Color.accentColor : Color.black.opacity(0.65),
+                    strokeColor(for: region, isSelected: isSelected),
                     style: StrokeStyle(
                         lineWidth: isSelected ? 2.5 : 1.5,
                         dash: isSelected ? [] : [8, 4]
@@ -93,6 +94,32 @@ struct RegionEditorOverlayView: View {
             view.gesture(moveGesture(for: region))
         }
         .zIndex(isSelected ? 1 : 0.5)
+    }
+
+    private func fillColor(for region: SensitiveRegion, isSelected: Bool) -> Color {
+        if region.isMasked {
+            return Color.black.opacity(isSelected ? 0.24 : 0.18)
+        }
+
+        switch region.source {
+        case .manual:
+            return Color.black.opacity(0.10)
+        case .ocr:
+            return Color.black.opacity(0.10)
+        }
+    }
+
+    private func strokeColor(for region: SensitiveRegion, isSelected: Bool) -> Color {
+        if isSelected {
+            return Color.accentColor
+        }
+
+        switch region.source {
+        case .manual:
+            return Color.black.opacity(0.65)
+        case .ocr:
+            return Color.black.opacity(0.65)
+        }
     }
 
     private func resizeHandles(for region: SensitiveRegion) -> some View {
@@ -246,8 +273,9 @@ struct RegionEditorOverlayView: View {
     }
 
     private func clampedMovingRect(_ rect: CGRect) -> CGRect {
-        let width = min(max(rect.width, minimumRegionLength), contentBounds.width)
-        let height = min(max(rect.height, minimumRegionLength), contentBounds.height)
+        let minimumSize = minimumRegionSize
+        let width = min(max(rect.width, minimumSize.width), contentBounds.width)
+        let height = min(max(rect.height, minimumSize.height), contentBounds.height)
         let clampedX = rect.minX.clamped(min: contentBounds.minX, max: contentBounds.maxX - width)
         let clampedY = rect.minY.clamped(min: contentBounds.minY, max: contentBounds.maxY - height)
 
@@ -260,10 +288,7 @@ struct RegionEditorOverlayView: View {
     }
 
     private func resizedRect(from initialRect: CGRect, corner: RegionHandleCorner, translation: CGSize) -> CGRect {
-        let minimumSize = CGSize(
-            width: min(minimumRegionLength, contentBounds.width),
-            height: min(minimumRegionLength, contentBounds.height)
-        )
+        let minimumSize = minimumRegionSize
         var minX = initialRect.minX
         var minY = initialRect.minY
         var maxX = initialRect.maxX
@@ -301,11 +326,20 @@ struct RegionEditorOverlayView: View {
     }
 
     private func isLargeEnough(_ rect: CGRect) -> Bool {
-        rect.width >= minimumRegionLength && rect.height >= minimumRegionLength
+        let minimumSize = minimumRegionSize
+
+        return rect.width >= minimumSize.width && rect.height >= minimumSize.height
     }
 
     private var contentBounds: CGRect {
         CGRect(origin: .zero, size: contentSize)
+    }
+
+    private var minimumRegionSize: CGSize {
+        CGSize(
+            width: min(minimumRegionWidth, contentBounds.width),
+            height: min(minimumRegionHeight, contentBounds.height)
+        )
     }
 }
 

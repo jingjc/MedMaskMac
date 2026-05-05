@@ -1,6 +1,12 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "-" : {
+
+    },
+    "+" : {
+
+    },
     "app.page_picker_label" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -324,6 +330,40 @@
         }
       }
     },
+    "export.failure_count" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed exports: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失败导出数：%@"
+          }
+        }
+      }
+    },
+    "export.failure.destination_not_directory" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The selected destination is not a folder."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选目标位置不是文件夹。"
+          }
+        }
+      }
+    },
     "export.failure.image_encoding_unavailable" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -409,23 +449,6 @@
         }
       }
     },
-    "export.failure.destination_not_directory" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The selected destination is not a folder."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "所选目标位置不是文件夹。"
-          }
-        }
-      }
-    },
     "export.failure.write_failed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -439,23 +462,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法将导出文件写入目标文件夹。"
-          }
-        }
-      }
-    },
-    "export.failure_count" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Failed exports: %@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "失败导出数：%@"
           }
         }
       }
@@ -851,6 +857,23 @@
         }
       }
     },
+    "import.description" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose local PDF or image files to load them into the current session."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择本地 PDF 或图像文件并加载到当前会话中。"
+          }
+        }
+      }
+    },
     "import.error.empty_pdf" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -902,23 +925,6 @@
         }
       }
     },
-    "import.description" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Choose local PDF or image files to load them into the current session. OCR and barcode detection are still out of scope."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "选择本地 PDF 或图像文件并加载到当前会话中。OCR 和条码检测仍不在当前范围内。"
-          }
-        }
-      }
-    },
     "import.local_first" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -942,13 +948,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Metadata import only. OCR and barcode scan are still out of scope"
+            "value" : "Current-page OCR runs only when requested"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "当前仅导入元数据。OCR 和条码扫描仍不在当前范围内。"
+            "value" : "仅在你请求时识别当前页面"
           }
         }
       }
@@ -1157,19 +1163,342 @@
         }
       }
     },
+    "ocr.category.address" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Address"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "地址"
+          }
+        }
+      }
+    },
+    "ocr.category.age" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Age"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "年龄"
+          }
+        }
+      }
+    },
+    "ocr.category.birthday" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Birthday"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "生日"
+          }
+        }
+      }
+    },
+    "ocr.category.bed_number" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bed Number"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "床号"
+          }
+        }
+      }
+    },
+    "ocr.category.chinese_id" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chinese ID"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "身份证号"
+          }
+        }
+      }
+    },
+    "ocr.category.custom" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义"
+          }
+        }
+      }
+    },
+    "ocr.category.date" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Date"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日期"
+          }
+        }
+      }
+    },
+    "ocr.category.exam_date" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exam Date"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查日期"
+          }
+        }
+      }
+    },
+    "ocr.category.department" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Department"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "科室"
+          }
+        }
+      }
+    },
+    "ocr.category.doctor" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "医生"
+          }
+        }
+      }
+    },
+    "ocr.category.document_number" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Document Number"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "证件号"
+          }
+        }
+      }
+    },
+    "ocr.category.email" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Email"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电子邮件"
+          }
+        }
+      }
+    },
+    "ocr.category.fax" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fax"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "传真"
+          }
+        }
+      }
+    },
+    "ocr.category.hospital" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hospital"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "医院"
+          }
+        }
+      }
+    },
+    "ocr.category.medical_number" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Medical Number"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "医疗编号"
+          }
+        }
+      }
+    },
+    "ocr.category.name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "姓名"
+          }
+        }
+      }
+    },
+    "ocr.category.phone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Phone"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手机号"
+          }
+        }
+      }
+    },
+    "ocr.category.sex" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sex"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "性别"
+          }
+        }
+      }
+    },
+    "ocr.category.unknown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unknown"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未知"
+          }
+        }
+      }
+    },
     "page_status.masked_preview" : {
       "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Masked Preview"
+            "value" : "Preview"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "遮罩预览"
+            "value" : "脱敏效果"
           }
         }
       }
@@ -1214,13 +1543,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Use when you want to manage manual regions directly."
+            "value" : "Uses the enabled checklist fields for OCR suggestions."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "当你希望直接管理手动区域时使用。"
+            "value" : "根据勾选字段生成 OCR 建议。"
           }
         }
       }
@@ -1242,19 +1571,206 @@
         }
       }
     },
+    "preset.custom.field.address" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Address"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "地址"
+          }
+        }
+      }
+    },
+    "preset.custom.field.age" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Age"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "年龄"
+          }
+        }
+      }
+    },
+    "preset.custom.field.dates" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dates"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日期"
+          }
+        }
+      }
+    },
+    "preset.custom.field.doctor" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "医生"
+          }
+        }
+      }
+    },
+    "preset.custom.field.email" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Email"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "邮箱"
+          }
+        }
+      }
+    },
+    "preset.custom.field.hospital_department" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hospital/Department"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "医院/科室"
+          }
+        }
+      }
+    },
+    "preset.custom.field.id_number" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ID Number"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "身份证号"
+          }
+        }
+      }
+    },
+    "preset.custom.field.medical_numbers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Medical Numbers"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "医疗编号"
+          }
+        }
+      }
+    },
+    "preset.custom.field.name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "姓名"
+          }
+        }
+      }
+    },
+    "preset.custom.field.phone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Phone"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手机号"
+          }
+        }
+      }
+    },
+    "preset.custom.field.sex" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gender"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "性别"
+          }
+        }
+      }
+    },
     "preset.standard.summary" : {
       "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Balanced default for common medical report cleanup."
+            "value" : "Detect name, phone number, ID number, outpatient number, inpatient number, medical record number, and other core identity fields."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "适用于常见医疗报告清理的平衡默认方案。"
+            "value" : "检测姓名、手机号、身份证号、门诊号、住院号、病案号等核心身份信息。"
           }
         }
       }
@@ -1282,13 +1798,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wider masking intended for conservative review."
+            "value" : "Adds demographics, dates, contact, facility, doctor, and bed information."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "采用更宽泛的遮罩范围，以便更保守地审核。"
+            "value" : "额外检测人口学、日期、联系方式、机构、医生和床号信息。"
           }
         }
       }
@@ -1306,23 +1822,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "严格脱敏"
-          }
-        }
-      }
-    },
-    "review.canvas.no_file" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No file selected"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未选择文件"
           }
         }
       }
@@ -1367,13 +1866,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Masked Preview"
+            "value" : "Preview"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "脱敏预览"
+            "value" : "脱敏效果"
           }
         }
       }
@@ -1384,13 +1883,30 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Masked preview is view-only. Switch back to Original to edit boxes."
+            "value" : "Preview is view-only. Switch back to Edit to edit boxes."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "脱敏预览仅供查看。切回原始视图后才能编辑框。"
+            "value" : "脱敏效果仅供查看。切回编辑后才能编辑框。"
+          }
+        }
+      }
+    },
+    "review.canvas.no_file" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No file selected"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未选择文件"
           }
         }
       }
@@ -1412,36 +1928,19 @@
         }
       }
     },
-    "review.canvas.preview_placeholder" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Select a file and page to preview."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "选择一个文件和页面以进行预览。"
-          }
-        }
-      }
-    },
     "review.canvas.original_preview" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Original"
+            "value" : "Edit"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "原始"
+            "value" : "编辑"
           }
         }
       }
@@ -1463,6 +1962,23 @@
         }
       }
     },
+    "review.canvas.preview_metadata" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ • Page %2$@ of %3$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ • 第 %2$@ / %3$@ 页"
+          }
+        }
+      }
+    },
     "review.canvas.preview_mode" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1480,19 +1996,19 @@
         }
       }
     },
-    "review.canvas.preview_metadata" : {
+    "review.canvas.preview_placeholder" : {
       "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@ • Page %2$@ of %3$@"
+            "value" : "Select a file and page to preview."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@ • 第 %2$@ / %3$@ 页"
+            "value" : "选择一个文件和页面以进行预览。"
           }
         }
       }
@@ -1544,6 +2060,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "画布"
+          }
+        }
+      }
+    },
+    "review.canvas.zoom.actual_size" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Actual Size"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实际大小"
+          }
+        }
+      }
+    },
+    "review.canvas.zoom.fit_to_width" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fit to Width"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按宽度"
+          }
+        }
+      }
+    },
+    "review.canvas.zoom.fit_to_window" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fit to Window"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完整显示"
           }
         }
       }
@@ -1622,13 +2189,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Show Masked Preview"
+            "value" : "Show Preview"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "显示脱敏预览"
+            "value" : "显示脱敏效果"
           }
         }
       }
@@ -1639,13 +2206,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Show Original"
+            "value" : "Show Edit"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "显示原始视图"
+            "value" : "显示编辑"
           }
         }
       }
@@ -1673,13 +2240,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "OCR and barcode services are not part of this V0."
+            "value" : "Run local OCR suggestions for the selected page only."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "OCR 和条码服务不属于当前 V0 范围。"
+            "value" : "仅对所选页面运行本地 OCR 建议。"
           }
         }
       }
@@ -1697,6 +2264,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "检测状态"
+          }
+        }
+      }
+    },
+    "review.inspector.custom_preset_fields" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom Fields"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义字段"
           }
         }
       }
@@ -1748,6 +2332,329 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "检查器"
+          }
+        }
+      }
+    },
+    "review.ocr.action.ignore" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ignore"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "忽略"
+          }
+        }
+      }
+    },
+    "review.ocr.action.locate" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Locate"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "定位"
+          }
+        }
+      }
+    },
+    "review.ocr.action.mask" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mask"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "脱敏"
+          }
+        }
+      }
+    },
+    "review.ocr.action.undo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undo"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "撤销"
+          }
+        }
+      }
+    },
+    "review.ocr.action.unmask" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unmask"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消脱敏"
+          }
+        }
+      }
+    },
+    "review.ocr.detect_current_page" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detect Current Page"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "识别当前页"
+          }
+        }
+      }
+    },
+    "review.ocr.detected_items_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detected Items"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "识别结果"
+          }
+        }
+      }
+    },
+    "review.ocr.no_candidates" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No sensitive items detected"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未识别到敏感信息"
+          }
+        }
+      }
+    },
+    "review.ocr.no_explicit_value" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No specific content recognized. Please check this fill-in area."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未识别到具体内容，建议检查该填写区域"
+          }
+        }
+      }
+    },
+    "review.ocr.state.failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OCR failed: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OCR 失败：%@"
+          }
+        }
+      }
+    },
+    "review.ocr.state.idle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Idle"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "空闲"
+          }
+        }
+      }
+    },
+    "review.ocr.state.no_page" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select a file and page first."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先选择文件和页面。"
+          }
+        }
+      }
+    },
+    "review.ocr.state.needs_rerun" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OCR options changed. Run OCR again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OCR 选项已变更，请重新识别。"
+          }
+        }
+      }
+    },
+    "review.ocr.state.running" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detecting current page..."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在识别当前页..."
+          }
+        }
+      }
+    },
+    "review.ocr.state.succeeded" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detected %d candidate item(s) on this page."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本页识别到 %d 个候选项"
+          }
+        }
+      }
+    },
+    "review.ocr.status.ignored" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ignored"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已忽略"
+          }
+        }
+      }
+    },
+    "review.ocr.status.masked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Masked"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已脱敏"
+          }
+        }
+      }
+    },
+    "review.ocr.status.pending" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pending"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "待处理"
+          }
+        }
+      }
+    },
+    "review.ocr.suggestion_hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OCR suggestions are normal editable boxes on the selected page."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OCR 建议框是所选页面上的普通可编辑框。"
           }
         }
       }
@@ -1905,23 +2812,6 @@
         }
       }
     },
-    "service.file_import.placeholder" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Real file picking is intentionally deferred in this phase."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "当前阶段刻意暂不实现真实文件选择。"
-          }
-        }
-      }
-    },
     "service.file_import.guidance" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1939,19 +2829,121 @@
         }
       }
     },
+    "service.file_import.placeholder" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Real file picking is intentionally deferred in this phase."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前阶段刻意暂不实现真实文件选择。"
+          }
+        }
+      }
+    },
     "service.mask.preview_summary" : {
       "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@ will burn %2$@ into masked preview and exported copies."
+            "value" : "%1$@ will burn %2$@ into preview and exported copies."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@ 会将 %2$@ 烧录到脱敏预览和导出副本中。"
+            "value" : "%1$@ 会将 %2$@ 烧录到脱敏效果和导出副本中。"
+          }
+        }
+      }
+    },
+    "service.ocr.failure.image_unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The image \"%@\" could not be prepared for OCR."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法为图像 \"%@\" 准备 OCR。"
+          }
+        }
+      }
+    },
+    "service.ocr.failure.pdf_page_unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PDF page %@ could not be prepared for OCR."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法为 PDF 第 %@ 页准备 OCR。"
+          }
+        }
+      }
+    },
+    "service.ocr.failure.pdf_unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The PDF \"%@\" could not be prepared for OCR."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法为 PDF \"%@\" 准备 OCR。"
+          }
+        }
+      }
+    },
+    "service.ocr.failure.recognition_failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vision text recognition failed. %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vision 文本识别失败。%@"
+          }
+        }
+      }
+    },
+    "service.ocr.failure.source_unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The source file is no longer available."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "源文件已不可用。"
           }
         }
       }
@@ -1962,13 +2954,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "OCR is not implemented in this V0."
+            "value" : "Local Vision OCR is available for current-page suggestions."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "当前 V0 未实现 OCR。"
+            "value" : "本地 Vision OCR 可用于当前页建议框。"
           }
         }
       }

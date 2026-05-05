@@ -1,4 +1,5 @@
 import Combine
+import CoreGraphics
 import Foundation
 
 @MainActor
@@ -11,6 +12,19 @@ final class AppViewModel: ObservableObject {
             }
 
             lastExportResult = nil
+            invalidateCurrentPageOCRCandidatesForOptionChange()
+        }
+    }
+    @Published var selectedCustomFields: Set<MaskCustomField> = MaskCustomField.defaultEnabledFields {
+        didSet {
+            guard oldValue != selectedCustomFields else {
+                return
+            }
+
+            lastExportResult = nil
+            if selectedPreset == .custom {
+                invalidateCurrentPageOCRCandidatesForOptionChange()
+            }
         }
     }
     @Published var previewDisplayMode: ReviewPreviewMode = .original {
@@ -34,6 +48,9 @@ final class AppViewModel: ObservableObject {
     @Published var selectedRegionID: SensitiveRegion.ID?
     @Published var importErrorMessage: String?
     @Published var lastExportResult: ExportResult?
+    @Published var currentPageOCRState: CurrentPageOCRState = .idle
+    @Published var ocrCandidates: [OCRSensitiveCandidate] = []
+    @Published var selectedOCRCandidateID: OCRSensitiveCandidate.ID?
 
     private let fileImportService: any FileImportService
     private let pdfRenderService: any PDFRenderService
@@ -46,12 +63,17 @@ final class AppViewModel: ObservableObject {
     private var redoStack: [PageEditSnapshot] = []
     private var historyPageID: PageItem.ID?
     private var isPageEditTransactionOpen = false
+    private let minimumCanvasZoomScale: CGFloat = 0.25
+    private let maximumCanvasZoomScale: CGFloat = 8.0
+    private let canvasZoomStep: CGFloat = 1.25
+    @Published private var canvasZoomStates: [PageItem.ID: CanvasZoomState] = [:]
+    private var canvasScrollOffsets: [PageItem.ID: CGPoint] = [:]
 
     init() {
         self.files = []
         self.fileImportService = DefaultFileImportService()
         self.pdfRenderService = DefaultPDFRenderService()
-        self.ocrService = PlaceholderOCRService()
+        self.ocrService = DefaultOCRService()
         self.barcodeService = PlaceholderBarcodeService()
         self.maskComposeService = DefaultMaskComposeService()
         self.exportService = DefaultExportService(maskComposeService: maskComposeService)
@@ -167,6 +189,146 @@ final class AppViewModel: ObservableObject {
 
     var canRedoCurrentPageEdit: Bool {
         !redoStack.isEmpty
+    }
+
+    var canDetectCurrentPageOCR: Bool {
+        hasImportedFiles && selectedFile != nil && selectedDocumentPage != nil && !currentPageOCRState.isRunning
+    }
+
+    var currentPageOCRStateSummary: String {
+        switch currentPageOCRState {
+        case .idle:
+            L10n.Review.ocrStateIdle
+        case .running:
+            L10n.Review.ocrStateRunning
+        case .needsRerun:
+            L10n.Review.ocrStateNeedsRerun
+        case let .succeeded(candidateCount):
+            L10n.Review.ocrStateSucceeded(candidateCount)
+        case let .failed(reason):
+            L10n.Review.ocrStateFailed(reason)
+        }
+    }
+
+    var selectedPageOCRCandidates: [OCRSensitiveCandidate] {
+        guard let selectedPageID else {
+            return []
+        }
+
+        return ocrCandidates.filter { $0.pageID == selectedPageID }
+    }
+
+    var visibleSelectedPageOCRCandidates: [OCRSensitiveCandidate] {
+        let includedCategories = ocrDetectionOptions.includedCategories
+
+        return selectedPageOCRCandidates
+            .filter { includedCategories.contains($0.category) }
+            .sorted { left, right in
+                if left.orderIndex != right.orderIndex {
+                    return left.orderIndex < right.orderIndex
+                }
+
+                return candidatePositionPrecedes(left, right)
+            }
+    }
+
+    var hasVisibleSelectedPageOCRCandidates: Bool {
+        !visibleSelectedPageOCRCandidates.isEmpty
+    }
+
+    var selectedCanvasScrollOffset: CGPoint {
+        guard let selectedPageID else {
+            return .zero
+        }
+
+        return canvasScrollOffsets[selectedPageID] ?? .zero
+    }
+
+    func canvasZoomPercentageText(
+        contentSize: CGSize?,
+        viewportSize: CGSize
+    ) -> String {
+        let percent = Int((resolvedCanvasZoomScale(
+            contentSize: contentSize,
+            viewportSize: viewportSize
+        ) * 100).rounded())
+
+        return "\(percent)%"
+    }
+
+    func resolvedCanvasZoomScale(
+        contentSize: CGSize?,
+        viewportSize: CGSize
+    ) -> CGFloat {
+        guard let contentSize,
+              contentSize.width > 0,
+              contentSize.height > 0,
+              viewportSize.width > 0,
+              viewportSize.height > 0,
+              let selectedPageID else {
+            return 1
+        }
+
+        let zoomState = canvasZoomStates[selectedPageID] ?? CanvasZoomState()
+
+        switch zoomState.mode {
+        case .fitWindow:
+            let widthScale = viewportSize.width / contentSize.width
+            let heightScale = viewportSize.height / contentSize.height
+            return max(min(widthScale, heightScale), 0.01)
+        case .fitWidth:
+            return max(viewportSize.width / contentSize.width, 0.01)
+        case .custom:
+            return clampedCanvasZoomScale(zoomState.customScale)
+        }
+    }
+
+    func zoomCanvasIn(
+        contentSize: CGSize?,
+        viewportSize: CGSize
+    ) {
+        let currentScale = resolvedCanvasZoomScale(contentSize: contentSize, viewportSize: viewportSize)
+        setSelectedCanvasCustomZoom(max(currentScale, minimumCanvasZoomScale) * canvasZoomStep)
+    }
+
+    func zoomCanvasOut(
+        contentSize: CGSize?,
+        viewportSize: CGSize
+    ) {
+        let currentScale = resolvedCanvasZoomScale(contentSize: contentSize, viewportSize: viewportSize)
+        setSelectedCanvasCustomZoom(max(currentScale, minimumCanvasZoomScale) / canvasZoomStep)
+    }
+
+    func fitCanvasToWindow() {
+        setSelectedCanvasZoomMode(.fitWindow, resetScroll: true)
+    }
+
+    func fitCanvasToWidth() {
+        setSelectedCanvasZoomMode(.fitWidth, resetScroll: true)
+    }
+
+    func resetCanvasZoomToActualSize() {
+        setSelectedCanvasCustomZoom(1, resetScroll: true)
+    }
+
+    func isCustomFieldEnabled(_ field: MaskCustomField) -> Bool {
+        selectedCustomFields.contains(field)
+    }
+
+    func setCustomField(_ field: MaskCustomField, isEnabled: Bool) {
+        if isEnabled {
+            selectedCustomFields.insert(field)
+        } else {
+            selectedCustomFields.remove(field)
+        }
+    }
+
+    func updateSelectedCanvasScrollOffset(_ offset: CGPoint) {
+        guard let selectedPageID else {
+            return
+        }
+
+        canvasScrollOffsets[selectedPageID] = offset
     }
 
     var canGoToPreviousPage: Bool {
@@ -375,7 +537,11 @@ final class AppViewModel: ObservableObject {
 
         selectedPageID = pageID
         selectedRegionID = nil
+        selectedOCRCandidateID = nil
         clearPageHistory()
+        if !currentPageOCRState.isRunning {
+            currentPageOCRState = .idle
+        }
 
         if let selectedFileID {
             lastSelectedPageByFileID[selectedFileID] = pageID
@@ -383,6 +549,8 @@ final class AppViewModel: ObservableObject {
     }
 
     func selectRegion(_ regionID: SensitiveRegion.ID?) {
+        selectedOCRCandidateID = nil
+
         guard let regionID else {
             selectedRegionID = nil
             return
@@ -402,6 +570,7 @@ final class AppViewModel: ObservableObject {
 
     func clearSelectedRegionSelection() {
         selectedRegionID = nil
+        selectedOCRCandidateID = nil
     }
 
     func createRegion(with bounds: NormalizedRect) {
@@ -414,7 +583,7 @@ final class AppViewModel: ObservableObject {
         var createdRegionID: SensitiveRegion.ID?
         mutateSelectedPage { page in
             let region = SensitiveRegion(
-                kind: .freeform,
+                kind: .custom,
                 bounds: clampedBounds,
                 isMasked: true
             )
@@ -423,6 +592,7 @@ final class AppViewModel: ObservableObject {
         }
 
         selectedRegionID = createdRegionID
+        selectedOCRCandidateID = nil
 
         if startedImplicitTransaction {
             endPageEditTransaction()
@@ -454,6 +624,7 @@ final class AppViewModel: ObservableObject {
             page.sensitiveRegions.removeAll { $0.id == selectedRegionID }
         }
 
+        markOCRCandidatesPending(linkedTo: selectedRegionID)
         self.selectedRegionID = nil
 
         if startedImplicitTransaction {
@@ -495,6 +666,7 @@ final class AppViewModel: ObservableObject {
 
         redoStack.append(currentSnapshot)
         applyPageEditSnapshot(snapshot)
+        reconcileOCRCandidatesWithSelectedPage()
         isPageEditTransactionOpen = false
     }
 
@@ -506,6 +678,7 @@ final class AppViewModel: ObservableObject {
 
         undoStack.append(currentSnapshot)
         applyPageEditSnapshot(snapshot)
+        reconcileOCRCandidatesWithSelectedPage()
         isPageEditTransactionOpen = false
     }
 
@@ -533,6 +706,163 @@ final class AppViewModel: ObservableObject {
 
     func togglePreviewDisplayMode() {
         previewDisplayMode = previewDisplayMode.toggled()
+    }
+
+    func detectCurrentPageOCR() {
+        guard !currentPageOCRState.isRunning else {
+            return
+        }
+
+        guard let selectedFile,
+              let selectedDocumentPage,
+              let selectedFileID,
+              let selectedPageID else {
+            currentPageOCRState = .failed(L10n.Review.ocrStateNoPage)
+            return
+        }
+
+        previewDisplayMode = .original
+        let detectionOptions = ocrDetectionOptions
+        clearOCRCandidates(on: selectedPageID)
+        currentPageOCRState = .running
+
+        Task {
+            do {
+                let candidates = try await ocrService.candidates(
+                    for: selectedFile,
+                    page: selectedDocumentPage,
+                    options: detectionOptions
+                )
+                if self.selectedPageID == selectedPageID {
+                    guard ocrDetectionOptions == detectionOptions else {
+                        currentPageOCRState = .needsRerun
+                        return
+                    }
+
+                    let candidateCount = replaceOCRCandidates(
+                        candidates,
+                        fileID: selectedFileID,
+                        pageID: selectedPageID
+                    )
+                    currentPageOCRState = .succeeded(candidateCount: candidateCount)
+                } else {
+                    currentPageOCRState = .idle
+                }
+            } catch {
+                if self.selectedPageID == selectedPageID {
+                    currentPageOCRState = .failed(error.localizedDescription)
+                } else {
+                    currentPageOCRState = .idle
+                }
+            }
+        }
+    }
+
+    func selectOCRCandidate(_ candidateID: OCRSensitiveCandidate.ID) {
+        guard let candidate = ocrCandidates.first(where: { $0.id == candidateID }) else {
+            return
+        }
+
+        selectedOCRCandidateID = candidateID
+
+        if let linkedRegionID = candidate.linkedRegionID,
+           selectedPageRegions.contains(where: { $0.id == linkedRegionID }) {
+            selectRegion(linkedRegionID)
+            selectedOCRCandidateID = candidateID
+        } else {
+            selectedRegionID = nil
+        }
+    }
+
+    func maskOCRCandidate(_ candidateID: OCRSensitiveCandidate.ID) {
+        guard let candidateIndex = ocrCandidates.firstIndex(where: { $0.id == candidateID }) else {
+            return
+        }
+
+        let candidate = ocrCandidates[candidateIndex]
+        guard candidate.status == .pending,
+              candidate.pageID == selectedPageID,
+              candidate.boundingBox.width > 0,
+              candidate.boundingBox.height > 0 else {
+            return
+        }
+
+        let startedImplicitTransaction = beginImplicitPageEditTransactionIfNeeded(for: candidate.pageID)
+        var createdRegionID: SensitiveRegion.ID?
+
+        mutateSelectedPage { page in
+            let region = SensitiveRegion(
+                kind: candidate.category.regionKind,
+                source: .ocr,
+                bounds: candidate.boundingBox,
+                confidence: candidate.confidence,
+                isMasked: true
+            )
+            page.sensitiveRegions.append(region)
+            createdRegionID = region.id
+        }
+
+        if let createdRegionID {
+            ocrCandidates[candidateIndex].status = .masked
+            ocrCandidates[candidateIndex].linkedRegionID = createdRegionID
+            selectedRegionID = createdRegionID
+        }
+
+        if startedImplicitTransaction {
+            endPageEditTransaction()
+        }
+    }
+
+    func ignoreOCRCandidate(_ candidateID: OCRSensitiveCandidate.ID) {
+        guard let candidateIndex = ocrCandidates.firstIndex(where: { $0.id == candidateID }) else {
+            return
+        }
+
+        guard ocrCandidates[candidateIndex].status == .pending else {
+            return
+        }
+
+        ocrCandidates[candidateIndex].status = .ignored
+    }
+
+    func undoOCRCandidate(_ candidateID: OCRSensitiveCandidate.ID) {
+        guard let candidateIndex = ocrCandidates.firstIndex(where: { $0.id == candidateID }) else {
+            return
+        }
+
+        let candidate = ocrCandidates[candidateIndex]
+        guard candidate.pageID == selectedPageID,
+              candidate.status == .masked || candidate.status == .ignored else {
+            return
+        }
+
+        if candidate.status == .masked,
+           let linkedRegionID = candidate.linkedRegionID {
+            let startedImplicitTransaction = beginImplicitPageEditTransactionIfNeeded(for: candidate.pageID)
+            mutateSelectedPage { page in
+                guard let regionIndex = page.sensitiveRegions.firstIndex(where: { $0.id == linkedRegionID }),
+                      page.sensitiveRegions[regionIndex].source == .ocr else {
+                    return
+                }
+
+                page.sensitiveRegions.remove(at: regionIndex)
+            }
+
+            if selectedRegionID == linkedRegionID {
+                selectedRegionID = nil
+            }
+
+            if startedImplicitTransaction {
+                endPageEditTransaction()
+            }
+        }
+
+        ocrCandidates[candidateIndex].status = .pending
+        ocrCandidates[candidateIndex].linkedRegionID = nil
+
+        if selectedOCRCandidateID == candidateID {
+            selectedOCRCandidateID = nil
+        }
     }
 
     func beginExportFlow() {
@@ -564,7 +894,11 @@ final class AppViewModel: ObservableObject {
         selectedFileID = file.id
         selectedPageID = resolvedPageID(in: file, preferredPageID: preferredPageID)
         selectedRegionID = nil
+        selectedOCRCandidateID = nil
         clearPageHistory()
+        if !currentPageOCRState.isRunning {
+            currentPageOCRState = .idle
+        }
 
         if let selectedPageID {
             lastSelectedPageByFileID[file.id] = selectedPageID
@@ -589,11 +923,73 @@ final class AppViewModel: ObservableObject {
         files = updatedFiles
     }
 
+    private func mutatePage(
+        fileID: FileItem.ID,
+        pageID: PageItem.ID,
+        _ mutation: (inout PageItem) -> Void
+    ) {
+        guard let fileIndex = files.firstIndex(where: { $0.id == fileID }),
+              let pageIndex = files[fileIndex].pages.firstIndex(where: { $0.id == pageID }) else {
+            return
+        }
+
+        var updatedFiles = files
+        mutation(&updatedFiles[fileIndex].pages[pageIndex])
+        files = updatedFiles
+    }
+
+    private func replaceOCRCandidates(
+        _ candidates: [OCRSensitiveCandidate],
+        fileID: FileItem.ID,
+        pageID: PageItem.ID
+    ) -> Int {
+        guard pageLocation(fileID: fileID, pageID: pageID) != nil else {
+            return 0
+        }
+
+        clearOCRCandidates(on: pageID)
+        var replacedCount = 0
+
+        let pageCandidates = candidates
+            .filter { $0.pageID == pageID }
+            .sorted(by: candidatePositionPrecedes)
+
+        for candidate in pageCandidates {
+            guard candidate.boundingBox.width > 0, candidate.boundingBox.height > 0 else {
+                continue
+            }
+
+            var newCandidate = candidate
+            newCandidate.orderIndex = replacedCount
+            ocrCandidates.append(newCandidate)
+            replacedCount += 1
+        }
+
+        return replacedCount
+    }
+
+    private var ocrDetectionOptions: OCRDetectionOptions {
+        OCRDetectionOptions(
+            preset: selectedPreset,
+            customFields: selectedCustomFields
+        )
+    }
+
     private var selectedPageLocation: (fileIndex: Int, pageIndex: Int)? {
         guard let selectedFileID,
-              let fileIndex = files.firstIndex(where: { $0.id == selectedFileID }),
-              let selectedPageID,
-              let pageIndex = files[fileIndex].pages.firstIndex(where: { $0.id == selectedPageID }) else {
+              let selectedPageID else {
+            return nil
+        }
+
+        return pageLocation(fileID: selectedFileID, pageID: selectedPageID)
+    }
+
+    private func pageLocation(
+        fileID: FileItem.ID,
+        pageID: PageItem.ID
+    ) -> (fileIndex: Int, pageIndex: Int)? {
+        guard let fileIndex = files.firstIndex(where: { $0.id == fileID }),
+              let pageIndex = files[fileIndex].pages.firstIndex(where: { $0.id == pageID }) else {
             return nil
         }
 
@@ -607,6 +1003,174 @@ final class AppViewModel: ObservableObject {
 
         beginPageEditTransaction()
         return true
+    }
+
+    private func beginImplicitPageEditTransactionIfNeeded(for pageID: PageItem.ID) -> Bool {
+        guard selectedPageID == pageID else {
+            return false
+        }
+
+        return beginImplicitPageEditTransactionIfNeeded()
+    }
+
+    private func matchingCandidateIndex(for candidate: OCRSensitiveCandidate) -> Int? {
+        ocrCandidates.firstIndex { existingCandidate in
+            existingCandidate.pageID == candidate.pageID
+                && candidateCategoriesOverlap(existingCandidate.category, candidate.category)
+                && normalizedCandidateText(existingCandidate.text) == normalizedCandidateText(candidate.text)
+                && existingCandidate.boundingBox.substantiallyOverlaps(candidate.boundingBox)
+        }
+    }
+
+    private func candidateCategoriesOverlap(
+        _ left: OCRCandidateCategory,
+        _ right: OCRCandidateCategory
+    ) -> Bool {
+        if left == right {
+            return true
+        }
+
+        let relatedPairs: [[OCRCandidateCategory]] = [
+            [.chineseID, .documentNumber],
+            [.phone, .fax],
+            [.date, .birthday, .examDate]
+        ]
+
+        return relatedPairs.contains { Set($0).isSuperset(of: Set([left, right])) }
+    }
+
+    private func markOCRCandidatesPending(linkedTo regionID: SensitiveRegion.ID) {
+        for index in ocrCandidates.indices where ocrCandidates[index].linkedRegionID == regionID {
+            ocrCandidates[index].status = .pending
+            ocrCandidates[index].linkedRegionID = nil
+        }
+    }
+
+    private func invalidateCurrentPageOCRCandidatesForOptionChange() {
+        guard let selectedPageID else {
+            selectedOCRCandidateID = nil
+            return
+        }
+
+        clearOCRCandidates(on: selectedPageID)
+
+        if !currentPageOCRState.isRunning, selectedDocumentPage != nil {
+            currentPageOCRState = .needsRerun
+        }
+    }
+
+    private func clearOCRCandidates(on pageID: PageItem.ID) {
+        let removedSelectedCandidate = selectedOCRCandidateID.map { selectedCandidateID in
+            ocrCandidates.contains { $0.id == selectedCandidateID && $0.pageID == pageID }
+        } ?? false
+
+        ocrCandidates.removeAll { $0.pageID == pageID }
+
+        if removedSelectedCandidate {
+            selectedOCRCandidateID = nil
+            selectedRegionID = nil
+        }
+    }
+
+    private func clearHiddenOCRCandidateSelection() {
+        guard let selectedOCRCandidateID,
+              let candidate = ocrCandidates.first(where: { $0.id == selectedOCRCandidateID }),
+              !ocrDetectionOptions.includedCategories.contains(candidate.category) else {
+            return
+        }
+
+        self.selectedOCRCandidateID = nil
+    }
+
+    private func reconcileOCRCandidatesWithSelectedPage() {
+        let selectedRegionIDs = Set(selectedPageRegions.map(\.id))
+
+        for index in ocrCandidates.indices where ocrCandidates[index].pageID == selectedPageID {
+            guard let linkedRegionID = ocrCandidates[index].linkedRegionID,
+                  !selectedRegionIDs.contains(linkedRegionID) else {
+                continue
+            }
+
+            ocrCandidates[index].status = .pending
+            ocrCandidates[index].linkedRegionID = nil
+        }
+    }
+
+    private func normalizedCandidateText(_ text: String) -> String {
+        text.replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private func nextOCRCandidateOrderIndex(on pageID: PageItem.ID) -> Int {
+        let existingOrderIndexes = ocrCandidates
+            .filter { $0.pageID == pageID && $0.orderIndex != .max }
+            .map(\.orderIndex)
+
+        return (existingOrderIndexes.max() ?? -1) + 1
+    }
+
+    private func setSelectedCanvasCustomZoom(
+        _ scale: CGFloat,
+        resetScroll: Bool = false
+    ) {
+        guard let selectedPageID else {
+            return
+        }
+
+        canvasZoomStates[selectedPageID] = CanvasZoomState(
+            mode: .custom,
+            customScale: clampedCanvasZoomScale(scale)
+        )
+
+        if resetScroll {
+            canvasScrollOffsets[selectedPageID] = .zero
+        }
+    }
+
+    private func setSelectedCanvasZoomMode(
+        _ mode: CanvasZoomMode,
+        resetScroll: Bool
+    ) {
+        guard let selectedPageID else {
+            return
+        }
+
+        let existingScale = canvasZoomStates[selectedPageID]?.customScale ?? 1
+        canvasZoomStates[selectedPageID] = CanvasZoomState(
+            mode: mode,
+            customScale: existingScale
+        )
+
+        if resetScroll {
+            canvasScrollOffsets[selectedPageID] = .zero
+        }
+    }
+
+    private func clampedCanvasZoomScale(_ scale: CGFloat) -> CGFloat {
+        min(max(scale, minimumCanvasZoomScale), maximumCanvasZoomScale)
+    }
+
+    private func candidatePositionPrecedes(
+        _ left: OCRSensitiveCandidate,
+        _ right: OCRSensitiveCandidate
+    ) -> Bool {
+        let leftCenterY = left.boundingBox.y + left.boundingBox.height / 2
+        let rightCenterY = right.boundingBox.y + right.boundingBox.height / 2
+        let sameRowThreshold = max(left.boundingBox.height, right.boundingBox.height) * 0.75
+        let isSameRow = abs(leftCenterY - rightCenterY) <= max(sameRowThreshold, 0.015)
+
+        if isSameRow, left.boundingBox.x != right.boundingBox.x {
+            return left.boundingBox.x < right.boundingBox.x
+        }
+
+        if left.boundingBox.y != right.boundingBox.y {
+            return left.boundingBox.y < right.boundingBox.y
+        }
+
+        return left.boundingBox.x < right.boundingBox.x
     }
 
     private func clearPageHistory() {
@@ -644,4 +1208,31 @@ final class AppViewModel: ObservableObject {
 private struct PageEditSnapshot {
     let regions: [SensitiveRegion]
     let selectedRegionID: SensitiveRegion.ID?
+}
+
+enum CurrentPageOCRState: Equatable {
+    case idle
+    case running
+    case needsRerun
+    case succeeded(candidateCount: Int)
+    case failed(String)
+
+    var isRunning: Bool {
+        if case .running = self {
+            return true
+        }
+
+        return false
+    }
+}
+
+private enum CanvasZoomMode: Equatable {
+    case fitWindow
+    case fitWidth
+    case custom
+}
+
+private struct CanvasZoomState: Equatable {
+    var mode: CanvasZoomMode = .fitWindow
+    var customScale: CGFloat = 1
 }

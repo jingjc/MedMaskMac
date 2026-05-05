@@ -16,7 +16,7 @@ enum PlaceholderContent {
                             bounds: NormalizedRect(x: 0.08, y: 0.10, width: 0.28, height: 0.05)
                         ),
                         SensitiveRegion(
-                            kind: .idNumber,
+                            kind: .chineseIDNumber,
                             bounds: NormalizedRect(x: 0.11, y: 0.23, width: 0.34, height: 0.05)
                         )
                     ]
