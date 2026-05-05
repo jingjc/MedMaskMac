@@ -723,7 +723,6 @@ final class AppViewModel: ObservableObject {
 
         previewDisplayMode = .original
         let detectionOptions = ocrDetectionOptions
-        clearOCRCandidates(on: selectedPageID)
         currentPageOCRState = .running
 
         Task {
@@ -947,12 +946,19 @@ final class AppViewModel: ObservableObject {
             return 0
         }
 
-        clearOCRCandidates(on: pageID)
-        var replacedCount = 0
-
-        let pageCandidates = candidates
+        let existingPageCandidates = ocrCandidates
+            .filter { $0.pageID == pageID }
+            .sorted(by: candidateOrderPrecedes)
+        let incomingPageCandidates = candidates
             .filter { $0.pageID == pageID }
             .sorted(by: candidatePositionPrecedes)
+        let pageCandidates = deduplicatedOCRCandidates(
+            existing: existingPageCandidates,
+            incoming: incomingPageCandidates
+        )
+
+        ocrCandidates.removeAll { $0.pageID == pageID }
+        var replacedCount = 0
 
         for candidate in pageCandidates {
             guard candidate.boundingBox.width > 0, candidate.boundingBox.height > 0 else {
@@ -965,7 +971,212 @@ final class AppViewModel: ObservableObject {
             replacedCount += 1
         }
 
+        if let selectedOCRCandidateID,
+           !ocrCandidates.contains(where: { $0.id == selectedOCRCandidateID }) {
+            self.selectedOCRCandidateID = nil
+            selectedRegionID = nil
+        }
+
         return replacedCount
+    }
+
+    private func deduplicatedOCRCandidates(
+        existing: [OCRSensitiveCandidate],
+        incoming: [OCRSensitiveCandidate]
+    ) -> [OCRSensitiveCandidate] {
+        var mergedCandidates: [OCRSensitiveCandidate] = []
+
+        for candidate in existing + incoming {
+            guard candidate.boundingBox.width > 0, candidate.boundingBox.height > 0 else {
+                continue
+            }
+
+            if let duplicateIndex = mergedCandidates.firstIndex(where: { areDuplicateOCRCandidates($0, candidate) }) {
+                mergedCandidates[duplicateIndex] = preferredOCRCandidate(
+                    existing: mergedCandidates[duplicateIndex],
+                    incoming: candidate
+                )
+            } else {
+                mergedCandidates.append(candidate)
+            }
+        }
+
+        return mergedCandidates
+    }
+
+    private func areDuplicateOCRCandidates(
+        _ left: OCRSensitiveCandidate,
+        _ right: OCRSensitiveCandidate
+    ) -> Bool {
+        guard left.pageID == right.pageID,
+              candidateCategoriesOverlap(left.category, right.category),
+              canMergeLinkedOCRCandidates(left, right),
+              sameOCRCandidateLocation(left, right) else {
+            return false
+        }
+
+        let leftValue = normalizedCandidateText(left.text)
+        let rightValue = normalizedCandidateText(right.text)
+
+        if left.detectionKind == .labelFallback || right.detectionKind == .labelFallback {
+            return true
+        }
+
+        return !leftValue.isEmpty && leftValue == rightValue
+    }
+
+    private func canMergeLinkedOCRCandidates(
+        _ left: OCRSensitiveCandidate,
+        _ right: OCRSensitiveCandidate
+    ) -> Bool {
+        guard let leftRegionID = left.linkedRegionID,
+              let rightRegionID = right.linkedRegionID else {
+            return true
+        }
+
+        return leftRegionID == rightRegionID
+    }
+
+    private func sameOCRCandidateLocation(
+        _ left: OCRSensitiveCandidate,
+        _ right: OCRSensitiveCandidate
+    ) -> Bool {
+        if ocrBoxesReferToSameLocation(left.boundingBox, right.boundingBox) {
+            return true
+        }
+
+        if let leftLabel = left.labelBoundingBox,
+           let rightLabel = right.labelBoundingBox,
+           ocrBoxesReferToSameLocation(leftLabel, rightLabel) {
+            return true
+        }
+
+        if let leftLabel = left.labelBoundingBox,
+           ocrBoxesReferToSameLocation(leftLabel, right.boundingBox) {
+            return true
+        }
+
+        if let rightLabel = right.labelBoundingBox,
+           ocrBoxesReferToSameLocation(left.boundingBox, rightLabel) {
+            return true
+        }
+
+        return false
+    }
+
+    private func ocrBoxesReferToSameLocation(
+        _ left: NormalizedRect,
+        _ right: NormalizedRect
+    ) -> Bool {
+        normalizedRectIoU(left, right) >= 0.18
+            || left.substantiallyOverlaps(right, threshold: 0.30)
+            || ocrBoxesAreVeryClose(left, right)
+    }
+
+    private func ocrBoxesAreVeryClose(
+        _ left: NormalizedRect,
+        _ right: NormalizedRect
+    ) -> Bool {
+        let centerDeltaX = abs(centerX(of: left) - centerX(of: right))
+        let centerDeltaY = abs(centerY(of: left) - centerY(of: right))
+        let xAllowance = max(left.width, right.width) * 0.85 + 0.08
+        let yAllowance = max(left.height, right.height) * 1.25 + 0.045
+
+        return centerDeltaX <= xAllowance && centerDeltaY <= yAllowance
+    }
+
+    private func normalizedRectIoU(
+        _ left: NormalizedRect,
+        _ right: NormalizedRect
+    ) -> Double {
+        let intersection = normalizedRectIntersectionArea(left, right)
+        let union = left.width * left.height + right.width * right.height - intersection
+
+        guard union > 0 else {
+            return 0
+        }
+
+        return intersection / union
+    }
+
+    private func normalizedRectIntersectionArea(
+        _ left: NormalizedRect,
+        _ right: NormalizedRect
+    ) -> Double {
+        let width = max(0, min(maxX(of: left), maxX(of: right)) - max(left.x, right.x))
+        let height = max(0, min(maxY(of: left), maxY(of: right)) - max(left.y, right.y))
+
+        return width * height
+    }
+
+    private func preferredOCRCandidate(
+        existing: OCRSensitiveCandidate,
+        incoming: OCRSensitiveCandidate
+    ) -> OCRSensitiveCandidate {
+        if statusPriority(existing.status) != statusPriority(incoming.status) {
+            return statusPriority(existing.status) > statusPriority(incoming.status) ? existing : incoming
+        }
+
+        if existing.linkedRegionID != nil, incoming.linkedRegionID == nil {
+            return existing
+        }
+
+        if incoming.linkedRegionID != nil, existing.linkedRegionID == nil {
+            return incoming
+        }
+
+        let existingHasExplicitValue = existing.detectionKind != .labelFallback
+        let incomingHasExplicitValue = incoming.detectionKind != .labelFallback
+
+        if existingHasExplicitValue != incomingHasExplicitValue {
+            return incomingHasExplicitValue ? incoming : existing
+        }
+
+        let existingConfidence = existing.confidence ?? 0
+        let incomingConfidence = incoming.confidence ?? 0
+        if existingConfidence != incomingConfidence {
+            return incomingConfidence > existingConfidence ? incoming : existing
+        }
+
+        return existing
+    }
+
+    private func statusPriority(_ status: OCRCandidateStatus) -> Int {
+        switch status {
+        case .masked:
+            3
+        case .ignored:
+            2
+        case .pending:
+            1
+        }
+    }
+
+    private func candidateOrderPrecedes(
+        _ left: OCRSensitiveCandidate,
+        _ right: OCRSensitiveCandidate
+    ) -> Bool {
+        if left.orderIndex != right.orderIndex {
+            return left.orderIndex < right.orderIndex
+        }
+
+        return candidatePositionPrecedes(left, right)
+    }
+
+    private func maxX(of rect: NormalizedRect) -> Double {
+        rect.x + rect.width
+    }
+
+    private func maxY(of rect: NormalizedRect) -> Double {
+        rect.y + rect.height
+    }
+
+    private func centerX(of rect: NormalizedRect) -> Double {
+        rect.x + rect.width / 2
+    }
+
+    private func centerY(of rect: NormalizedRect) -> Double {
+        rect.y + rect.height / 2
     }
 
     private var ocrDetectionOptions: OCRDetectionOptions {

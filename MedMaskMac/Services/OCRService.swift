@@ -245,7 +245,9 @@ struct DefaultOCRService: OCRService {
         )
 
         for (labelIndex, labelItem) in textItems.enumerated() {
-            guard !consumedSplitNameLabelIndexes.contains(labelIndex) else {
+            let wasConsumed = consumedSplitNameLabelIndexes.contains(labelIndex)
+
+            guard !wasConsumed else {
                 continue
             }
 
@@ -332,22 +334,21 @@ struct DefaultOCRService: OCRService {
         var groups: [OCRSplitNameLabelGroup] = []
 
         for surname in surnames {
-            guard !consumedIndexes.contains(surname.index),
-                  let givenName = givenNames
-                      .filter({
-                          !consumedIndexes.contains($0.index)
-                              && splitNameLabelsBelongToSameField(surname.boundingBox, $0.boundingBox)
-                      })
-                      .sorted(by: {
-                          splitNameLabelGroupScore(surname.boundingBox, $0.boundingBox)
-                              < splitNameLabelGroupScore(surname.boundingBox, $1.boundingBox)
-                      })
-                      .first else {
+            guard !consumedIndexes.contains(surname.index) else {
                 continue
             }
 
-            groups.append(
-                OCRSplitNameLabelGroup(
+            if let givenName = givenNames
+                .filter({
+                          !consumedIndexes.contains($0.index)
+                              && splitNameLabelsBelongToSameField(surname.boundingBox, $0.boundingBox)
+                      })
+                .sorted(by: {
+                          splitNameLabelGroupScore(surname.boundingBox, $0.boundingBox)
+                              < splitNameLabelGroupScore(surname.boundingBox, $1.boundingBox)
+                      })
+                .first {
+                let group = OCRSplitNameLabelGroup(
                     surnameIndex: surname.index,
                     givenNameIndex: givenName.index,
                     surnameBoundingBox: surname.boundingBox,
@@ -355,16 +356,28 @@ struct DefaultOCRService: OCRService {
                     labelBoundingBox: unionRect(surname.boundingBox, givenName.boundingBox),
                     confidence: min(surname.confidence, givenName.confidence)
                 )
-            )
-            consumedIndexes.insert(surname.index)
-            consumedIndexes.insert(givenName.index)
+                groups.append(group)
+                consumedIndexes.insert(surname.index)
+                consumedIndexes.insert(givenName.index)
+            } else {
+                let group = OCRSplitNameLabelGroup(
+                    surnameIndex: surname.index,
+                    givenNameIndex: nil,
+                    surnameBoundingBox: surname.boundingBox,
+                    givenNameBoundingBox: nil,
+                    labelBoundingBox: surname.boundingBox,
+                    confidence: surname.confidence
+                )
+                groups.append(group)
+                consumedIndexes.insert(surname.index)
+            }
         }
 
         return groups
     }
 
     private static func splitNameLabelPart(for text: String) -> OCRSplitNameLabelPart? {
-        switch normalizedOCRLabelText(text) {
+        switch normalizedSplitNameLabelText(text) {
         case "姓":
             return .surname
         case "名":
@@ -374,12 +387,12 @@ struct DefaultOCRService: OCRService {
         }
     }
 
-    private static func splitNameLabelPrecedes(
+    nonisolated private static func splitNameLabelPrecedes(
         _ left: OCRSplitNameLabelItem,
         _ right: OCRSplitNameLabelItem
     ) -> Bool {
-        let leftCenterY = left.boundingBox.centerY
-        let rightCenterY = right.boundingBox.centerY
+        let leftCenterY = left.boundingBox.y + left.boundingBox.height / 2
+        let rightCenterY = right.boundingBox.y + right.boundingBox.height / 2
         let sameRowThreshold = max(left.boundingBox.height, right.boundingBox.height) * 0.75
         let isSameRow = abs(leftCenterY - rightCenterY) <= max(sameRowThreshold, 0.015)
 
@@ -468,11 +481,13 @@ struct DefaultOCRService: OCRService {
         pageID: PageItem.ID,
         options: OCRDetectionOptions
     ) -> OCRSensitiveCandidate? {
-        let searchBoxes = [
+        var searchBoxes = [
             group.labelBoundingBox,
-            group.surnameBoundingBox,
-            group.givenNameBoundingBox
+            group.surnameBoundingBox
         ]
+        if let givenNameBoundingBox = group.givenNameBoundingBox {
+            searchBoxes.append(givenNameBoundingBox)
+        }
 
         if let valueItem = nearestValueItem(
             for: searchBoxes,
@@ -487,7 +502,7 @@ struct DefaultOCRService: OCRService {
             excluding: group.itemIndexes,
             mode: .below
         ) {
-            return OCRSensitiveCandidate(
+            let candidate = OCRSensitiveCandidate(
                 pageID: pageID,
                 text: displayText(valueItem.text, for: .name),
                 category: .name,
@@ -496,6 +511,7 @@ struct DefaultOCRService: OCRService {
                 labelBoundingBox: group.labelBoundingBox,
                 detectionKind: .labelValue
             )
+            return candidate
         }
 
         let fallbackBox = likelyFillArea(toRightOf: group.labelBoundingBox)
@@ -507,7 +523,7 @@ struct DefaultOCRService: OCRService {
             return nil
         }
 
-        return OCRSensitiveCandidate(
+        let candidate = OCRSensitiveCandidate(
             pageID: pageID,
             text: L10n.Review.ocrNoExplicitValue,
             category: .name,
@@ -516,6 +532,7 @@ struct DefaultOCRService: OCRService {
             labelBoundingBox: group.labelBoundingBox,
             detectionKind: .labelFallback
         )
+        return candidate
     }
 
     private static func candidateNearLabel(
@@ -797,11 +814,10 @@ struct DefaultOCRService: OCRService {
             isValidCandidateForFinalOutput(candidate)
         }
         let mergedCandidates = mergedLabelFallbackCandidates(validatedCandidates)
-        return deduplicatedCandidates(
-            mergedCandidates.filter { candidate in
-                isValidCandidateForFinalOutput(candidate)
-            }
-        )
+        let revalidatedMergedCandidates = mergedCandidates.filter { candidate in
+            isValidCandidateForFinalOutput(candidate)
+        }
+        return deduplicatedCandidates(revalidatedMergedCandidates)
     }
 
     private static func isValidCandidateForFinalOutput(_ candidate: OCRSensitiveCandidate) -> Bool {
@@ -1169,7 +1185,11 @@ struct DefaultOCRService: OCRService {
         let nameCandidates = result.filter { $0.category == .name }
 
         return splitNameLabelPart(for: "姓:") == .surname
+            && splitNameLabelPart(for: "姓；") == .surname
             && splitNameLabelPart(for: "名：") == .givenName
+            && splitNameLabelPart(for: "名；") == .givenName
+            && !(labelRules.first { $0.category == .name }?.matches("使用协议名称：“Threshold 500Hz TB\"-打印于：2023-7-21 11:15:45") ?? true)
+            && !(labelRules.first { $0.category == .name }?.matches("名称") ?? true)
             && splitGroups.count == 1
             && splitGroups.first?.itemIndexes == Set([0, 1])
             && !isLikelyValue("30岁", for: .name)
@@ -1209,24 +1229,22 @@ struct DefaultOCRService: OCRService {
         _ right: OCRSensitiveCandidate
     ) -> Bool {
         guard left.pageID == right.pageID,
-              candidateCategoriesOverlap(left.category, right.category) else {
+               candidateCategoriesOverlap(left.category, right.category) else {
             return false
         }
 
+        let sameLocation = sameCandidateLocation(left, right)
+
         if left.detectionKind == .labelFallback || right.detectionKind == .labelFallback {
-            if left.detectionKind == .labelFallback && right.detectionKind == .labelFallback {
-                return sameNearbyLabel(left, right)
-                    || sameSplitLabelArea(left, right)
-                    || boxesOverlapOrAreNearby(left.boundingBox, right.boundingBox)
+            guard sameLocation else {
+                return false
             }
 
-            let fallback = left.detectionKind == .labelFallback ? left : right
-            let valueCandidate = left.detectionKind == .labelFallback ? right : left
+            if left.detectionKind == .labelFallback && right.detectionKind == .labelFallback {
+                return comparableValue(for: left) == comparableValue(for: right)
+            }
 
-            return sameNearbyLabel(fallback, valueCandidate)
-                || sameSplitLabelArea(fallback, valueCandidate)
-                || fallback.boundingBox.substantiallyOverlaps(valueCandidate.boundingBox, threshold: 0.25)
-                || boxesOverlapOrAreNearby(fallback.boundingBox, valueCandidate.boundingBox)
+            return true
         }
 
         let leftValue = comparableValue(for: left)
@@ -1237,15 +1255,91 @@ struct DefaultOCRService: OCRService {
             return false
         }
 
-        return sameNearbyLabel(left, right)
-            || sameSplitLabelArea(left, right)
-            || boxesOverlapOrAreNearby(left.boundingBox, right.boundingBox)
+        return sameLocation
+    }
+
+    private static func sameCandidateLocation(
+        _ left: OCRSensitiveCandidate,
+        _ right: OCRSensitiveCandidate
+    ) -> Bool {
+        if candidateBoxesReferToSameLocation(left.boundingBox, right.boundingBox) {
+            return true
+        }
+
+        if sameNearbyLabel(left, right) || sameSplitLabelArea(left, right) {
+            return true
+        }
+
+        if let leftLabel = left.labelBoundingBox,
+           candidateBoxesReferToSameLocation(leftLabel, right.boundingBox) {
+            return true
+        }
+
+        if let rightLabel = right.labelBoundingBox,
+           candidateBoxesReferToSameLocation(left.boundingBox, rightLabel) {
+            return true
+        }
+
+        return false
+    }
+
+    private static func candidateBoxesReferToSameLocation(
+        _ left: NormalizedRect,
+        _ right: NormalizedRect
+    ) -> Bool {
+        normalizedRectIoU(left, right) >= 0.18
+            || left.substantiallyOverlaps(right, threshold: 0.30)
+            || boxesOverlapOrAreNearby(left, right)
+            || candidateBoxCentersAreClose(left, right)
+    }
+
+    private static func candidateBoxCentersAreClose(
+        _ left: NormalizedRect,
+        _ right: NormalizedRect
+    ) -> Bool {
+        let centerDeltaX = abs(left.centerX - right.centerX)
+        let centerDeltaY = abs(left.centerY - right.centerY)
+        let xAllowance = max(left.width, right.width) * 0.85 + 0.08
+        let yAllowance = max(left.height, right.height) * 1.25 + 0.045
+
+        return centerDeltaX <= xAllowance && centerDeltaY <= yAllowance
+    }
+
+    private static func normalizedRectIoU(
+        _ left: NormalizedRect,
+        _ right: NormalizedRect
+    ) -> Double {
+        let intersection = normalizedRectIntersectionArea(left, right)
+        let union = left.width * left.height + right.width * right.height - intersection
+
+        guard union > 0 else {
+            return 0
+        }
+
+        return intersection / union
+    }
+
+    private static func normalizedRectIntersectionArea(
+        _ left: NormalizedRect,
+        _ right: NormalizedRect
+    ) -> Double {
+        let width = max(0, min(left.maxX, right.maxX) - max(left.x, right.x))
+        let height = max(0, min(left.maxY, right.maxY) - max(left.y, right.y))
+
+        return width * height
     }
 
     private static func isPreferredCandidate(
         _ candidate: OCRSensitiveCandidate,
         over existingCandidate: OCRSensitiveCandidate
     ) -> Bool {
+        let candidateHasExplicitValue = candidate.detectionKind != .labelFallback
+        let existingHasExplicitValue = existingCandidate.detectionKind != .labelFallback
+
+        if candidateHasExplicitValue != existingHasExplicitValue {
+            return candidateHasExplicitValue
+        }
+
         if candidate.category != existingCandidate.category {
             let categories = Set([candidate.category, existingCandidate.category])
 
@@ -1673,14 +1767,18 @@ private struct OCRSplitNameLabelItem {
 
 private struct OCRSplitNameLabelGroup {
     let surnameIndex: Int
-    let givenNameIndex: Int
+    let givenNameIndex: Int?
     let surnameBoundingBox: NormalizedRect
-    let givenNameBoundingBox: NormalizedRect
+    let givenNameBoundingBox: NormalizedRect?
     let labelBoundingBox: NormalizedRect
     let confidence: Double
 
     var itemIndexes: Set<Int> {
-        [surnameIndex, givenNameIndex]
+        var indexes = Set([surnameIndex])
+        if let givenNameIndex {
+            indexes.insert(givenNameIndex)
+        }
+        return indexes
     }
 }
 
@@ -1737,7 +1835,12 @@ private struct OCRLabelRule {
         let normalized = normalizedOCRLabelText(text)
 
         return labelPatterns.contains { pattern in
-            normalized.localizedCaseInsensitiveContains(normalizedOCRLabelText(pattern))
+            let normalizedPattern = normalizedOCRLabelText(pattern)
+            if isSingleCharacterSplitNameLabelPattern(normalizedPattern) {
+                return normalizedSplitNameLabelText(text) == normalizedPattern
+            }
+
+            return normalized.localizedCaseInsensitiveContains(normalizedPattern)
         }
     }
 
@@ -2059,6 +2162,26 @@ private func normalizedOCRLabelText(_ text: String) -> String {
         .replacingOccurrences(of: ":", with: "")
         .trimmingCharacters(in: .whitespacesAndNewlines)
         .lowercased()
+}
+
+private func normalizedSplitNameLabelText(_ text: String) -> String {
+    normalizedOCRValueText(text)
+        .replacingOccurrences(of: " ", with: "")
+        .replacingOccurrences(of: ":", with: "")
+        .replacingOccurrences(of: "：", with: "")
+        .replacingOccurrences(of: ";", with: "")
+        .replacingOccurrences(of: "；", with: "")
+        .replacingOccurrences(of: "﹔", with: "")
+        .replacingOccurrences(of: "｡", with: "")
+        .replacingOccurrences(of: "。", with: "")
+        .replacingOccurrences(of: "．", with: "")
+        .replacingOccurrences(of: ".", with: "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+}
+
+private func isSingleCharacterSplitNameLabelPattern(_ normalizedPattern: String) -> Bool {
+    normalizedPattern == "姓" || normalizedPattern == "名"
 }
 
 private func normalizedOCRValueText(_ text: String) -> String {
