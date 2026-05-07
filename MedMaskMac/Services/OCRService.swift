@@ -148,6 +148,15 @@ struct DefaultOCRService: OCRService {
         options: OCRDetectionOptions
     ) -> [OCRSensitiveCandidate] {
         let textItems = recognizedTextItems(from: observations)
+
+        return buildCandidates(from: textItems, pageID: pageID, options: options)
+    }
+
+    private static func buildCandidates(
+        from textItems: [OCRTextItem],
+        pageID: PageItem.ID,
+        options: OCRDetectionOptions
+    ) -> [OCRSensitiveCandidate] {
         let includedCategories = options.includedCategories
         var candidates: [OCRSensitiveCandidate] = []
 
@@ -514,7 +523,7 @@ struct DefaultOCRService: OCRService {
             return candidate
         }
 
-        let fallbackBox = likelyFillArea(toRightOf: group.labelBoundingBox)
+        let fallbackBox = likelySplitNameFillArea(for: group)
         guard allowsLabelFallback(
             for: .name,
             fallbackBox: fallbackBox,
@@ -545,6 +554,7 @@ struct DefaultOCRService: OCRService {
         if let inlineValue = inlineValueCandidate(
             labelRule: labelRule,
             labelItem: labelItem,
+            options: options,
             pageID: pageID
         ) {
             return inlineValue
@@ -572,7 +582,9 @@ struct DefaultOCRService: OCRService {
             )
         }
 
-        let fallbackBox = likelyFillArea(toRightOf: labelItem.boundingBox)
+        let fallbackBox = labelRule.category == .name && options.preset == .standard
+            ? likelyNameFillArea(toRightOf: labelItem.boundingBox)
+            : likelyFillArea(toRightOf: labelItem.boundingBox)
         guard allowsLabelFallback(
             for: labelRule.category,
             fallbackBox: fallbackBox,
@@ -595,9 +607,13 @@ struct DefaultOCRService: OCRService {
     private static func inlineValueCandidate(
         labelRule: OCRLabelRule,
         labelItem: OCRTextItem,
+        options: OCRDetectionOptions,
         pageID: PageItem.ID
     ) -> OCRSensitiveCandidate? {
-        guard let valueRange = labelRule.inlineValueRange(in: labelItem.text),
+        guard let valueRange = labelRule.inlineValueRange(
+            in: labelItem.text,
+            allowsNameWithSpaces: options.preset == .standard
+        ),
               let bounds = appNormalizedRect(
                   for: valueRange,
                   in: labelItem.recognizedText,
@@ -758,12 +774,49 @@ struct DefaultOCRService: OCRService {
         .clamped()
     }
 
+    private static func likelyNameFillArea(toRightOf labelBox: NormalizedRect) -> NormalizedRect {
+        let gap = 0.015
+        let x = min(labelBox.maxX + gap, 0.94)
+        let width = min(max(0.22, labelBox.width * 2.8), 0.56, 0.98 - x)
+        let height = min(max(labelBox.height * 1.45, 0.032), 0.07)
+        let y = max(labelBox.centerY - height / 2, 0)
+
+        return NormalizedRect(
+            x: x,
+            y: y,
+            width: width,
+            height: height
+        )
+        .clamped()
+    }
+
+    private static func likelySplitNameFillArea(for group: OCRSplitNameLabelGroup) -> NormalizedRect {
+        let labelBoxes = [group.surnameBoundingBox, group.givenNameBoundingBox].compactMap(\.self)
+        let labelBox = group.labelBoundingBox
+        let rightEdge = labelBoxes.map(\.maxX).max() ?? labelBox.maxX
+        let rowHeight = labelBoxes.map(\.height).max() ?? labelBox.height
+        let gap = 0.015
+        let x = min(rightEdge + gap, 0.94)
+        let width = min(max(0.24, labelBox.width * 2.8), 0.58, 0.98 - x)
+        let y = max(labelBox.y - max(rowHeight * 0.35, 0.006), 0)
+        let height = min(max(labelBox.height + rowHeight * 0.70, 0.036), 0.16, 1 - y)
+
+        return NormalizedRect(
+            x: x,
+            y: y,
+            width: width,
+            height: height
+        )
+        .clamped()
+    }
+
     private static func appNormalizedRect(
         for targetRange: NSRange,
-        in recognizedText: VNRecognizedText,
+        in recognizedText: VNRecognizedText?,
         fallbackBounds: NormalizedRect
     ) -> NormalizedRect? {
-        guard let stringRange = Range(targetRange, in: recognizedText.string),
+        guard let recognizedText,
+              let stringRange = Range(targetRange, in: recognizedText.string),
               let preciseBounds = try? recognizedText.boundingBox(for: stringRange)?.boundingBox else {
             return fallbackBounds
         }
@@ -1114,12 +1167,25 @@ struct DefaultOCRService: OCRService {
     }
 
     #if DEBUG
+    struct DebugStandardNameRegressionCaseResult {
+        let caseName: String
+        let passed: Bool
+        let details: String
+    }
+
     static func debugStandardNamePostProcessingRegressionCheck() -> Bool {
+        debugStandardNamePostProcessingRegressionResults().allSatisfy(\.passed)
+    }
+
+    static func debugStandardNamePostProcessingRegressionResults() -> [DebugStandardNameRegressionCaseResult] {
         let pageID = UUID()
         let missingValueText = L10n.Review.ocrNoExplicitValue
         let surnameLabelBox = NormalizedRect(x: 0.10, y: 0.10, width: 0.035, height: 0.018)
         let givenNameLabelBox = NormalizedRect(x: 0.10, y: 0.135, width: 0.035, height: 0.018)
         let ageValueBox = NormalizedRect(x: 0.20, y: 0.135, width: 0.050, height: 0.018)
+        let idLabelBox = NormalizedRect(x: 0.10, y: 0.205, width: 0.070, height: 0.018)
+        let idValueBox = NormalizedRect(x: 0.20, y: 0.205, width: 0.220, height: 0.018)
+        let idValue = "420117199303207538"
         let splitGroups = splitNameLabelGroups(
             from: [
                 OCRSplitNameLabelItem(
@@ -1137,70 +1203,193 @@ struct DefaultOCRService: OCRService {
             ]
         )
 
-        let candidates = [
-            OCRSensitiveCandidate(
-                pageID: pageID,
-                text: missingValueText,
-                category: .name,
-                boundingBox: likelyFillArea(toRightOf: surnameLabelBox),
-                labelBoundingBox: surnameLabelBox,
-                detectionKind: .labelFallback
+        let case1 = debugStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                debugTextItem("姓:", box: surnameLabelBox),
+                debugTextItem("名:", box: givenNameLabelBox),
+                debugTextItem("30岁", box: ageValueBox),
+                debugTextItem("身份证号", box: idLabelBox),
+                debugTextItem(idValue, box: idValueBox)
+            ]
+        )
+        let case2 = debugStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                debugTextItem("姓；", box: surnameLabelBox),
+                debugTextItem("身份证号", box: idLabelBox),
+                debugTextItem(idValue, box: idValueBox)
+            ]
+        )
+        let case3 = debugStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                debugTextItem("姓名：张三", box: NormalizedRect(x: 0.10, y: 0.10, width: 0.180, height: 0.018))
+            ]
+        )
+        let case4 = debugStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                debugTextItem("姓名：", box: NormalizedRect(x: 0.10, y: 0.10, width: 0.055, height: 0.018))
+            ]
+        )
+        let case5 = debugStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                debugTextItem(
+                    "使用协议名称：“Threshold 500Hz TB”-打印于：2023-7-21 11:15:45",
+                    box: NormalizedRect(x: 0.10, y: 0.10, width: 0.620, height: 0.018)
+                )
+            ]
+        )
+        let case6 = debugStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                debugTextItem("姓名：", box: NormalizedRect(x: 0.10, y: 0.10, width: 0.055, height: 0.018)),
+                debugTextItem("30岁", box: NormalizedRect(x: 0.20, y: 0.10, width: 0.050, height: 0.018))
+            ]
+        )
+        let case7 = debugStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                debugTextItem("年龄：30岁", box: NormalizedRect(x: 0.10, y: 0.10, width: 0.100, height: 0.018)),
+                debugTextItem("性别：M", box: NormalizedRect(x: 0.10, y: 0.14, width: 0.080, height: 0.018)),
+                debugTextItem("生日：1993-03-20", box: NormalizedRect(x: 0.10, y: 0.18, width: 0.160, height: 0.018)),
+                debugTextItem("电子邮件：", box: NormalizedRect(x: 0.10, y: 0.22, width: 0.100, height: 0.018))
+            ]
+        )
+
+        return [
+            debugRegressionResult(
+                "Case 1",
+                candidates: case1,
+                passed: splitNameLabelPart(for: "姓:") == .surname
+                    && splitNameLabelPart(for: "名:") == .givenName
+                    && splitGroups.count == 1
+                    && splitGroups.first?.itemIndexes == Set([0, 1])
+                    && debugHasSingleNameFallback(case1, missingValueText: missingValueText, minimumWidth: 0.20, minimumHeight: 0.045)
+                    && debugContains(case1, category: .chineseID, text: idValue)
+                    && case1.count == 2
+                    && !debugContains(case1, category: .name, text: "30岁")
+                    && !case1.contains { $0.category == .age }
             ),
-            OCRSensitiveCandidate(
-                pageID: pageID,
-                text: missingValueText,
-                category: .name,
-                boundingBox: likelyFillArea(toRightOf: givenNameLabelBox),
-                labelBoundingBox: givenNameLabelBox,
-                detectionKind: .labelFallback
+            debugRegressionResult(
+                "Case 2",
+                candidates: case2,
+                passed: splitNameLabelPart(for: "姓；") == .surname
+                    && debugHasSingleNameFallback(case2, missingValueText: missingValueText, minimumWidth: 0.20)
+                    && debugContains(case2, category: .chineseID, text: idValue)
+                    && case2.count == 2
             ),
-            OCRSensitiveCandidate(
-                pageID: pageID,
-                text: "30岁",
-                category: .name,
-                boundingBox: ageValueBox,
-                labelBoundingBox: givenNameLabelBox,
-                detectionKind: .labelValue
+            debugRegressionResult(
+                "Case 3",
+                candidates: case3,
+                passed: case3.count == 1
+                    && debugContains(case3, category: .name, text: "张三")
             ),
-            OCRSensitiveCandidate(
-                pageID: pageID,
-                text: "30岁",
-                category: .age,
-                boundingBox: ageValueBox,
-                detectionKind: .directValue
+            debugRegressionResult(
+                "Case 4",
+                candidates: case4,
+                passed: case4.count == 1
+                    && debugHasSingleNameFallback(case4, missingValueText: missingValueText, minimumWidth: 0.20)
             ),
-            OCRSensitiveCandidate(
-                pageID: pageID,
-                text: "11010119930320777X",
-                category: .chineseID,
-                boundingBox: NormalizedRect(x: 0.20, y: 0.20, width: 0.30, height: 0.018),
-                detectionKind: .directValue
+            debugRegressionResult(
+                "Case 5",
+                candidates: case5,
+                passed: case5.isEmpty
+                    && !(labelRules.first { $0.category == .name }?.matches("使用协议名称：“Threshold 500Hz TB\"-打印于：2023-7-21 11:15:45") ?? true)
+                    && !(labelRules.first { $0.category == .name }?.matches("名称") ?? true)
+            ),
+            debugRegressionResult(
+                "Case 6",
+                candidates: case6,
+                passed: case6.count == 1
+                    && debugHasSingleNameFallback(case6, missingValueText: missingValueText, minimumWidth: 0.20)
+                    && !debugContains(case6, category: .name, text: "30岁")
+            ),
+            debugRegressionResult(
+                "Case 7",
+                candidates: case7,
+                passed: case7.isEmpty
+                    && !isLikelyValue("30岁", for: .name)
+                    && !isLikelyValue("30", for: .name)
+                    && !isLikelyValue("Age 30", for: .name)
+                    && !isLikelyValue("三十岁", for: .name)
+                    && !isLikelyValue("男", for: .name)
+                    && !isLikelyValue("女", for: .name)
+                    && !isLikelyValue("M", for: .name)
+                    && !isLikelyValue("F", for: .name)
+                    && !isLikelyValue("中国", for: .name)
+                    && !isLikelyValue(idValue, for: .name)
+                    && !isLikelyValue("test@example.com", for: .name)
+                    && !isLikelyValue("13800138000", for: .name)
+                    && !isLikelyValue("1993-03-20", for: .name)
+                    && !isLikelyValue("项目名称", for: .name)
             )
         ]
+    }
 
-        let result = finalizedCandidates(
-            candidates,
-            includedCategories: OCRDetectionOptions.standardCategories
+    private static func debugTextItem(_ text: String, box: NormalizedRect) -> OCRTextItem {
+        OCRTextItem(text: text, recognizedText: nil, boundingBox: box, confidence: 0.90)
+    }
+
+    private static func debugStandardCandidates(
+        pageID: PageItem.ID,
+        textItems: [OCRTextItem]
+    ) -> [OCRSensitiveCandidate] {
+        buildCandidates(
+            from: textItems,
+            pageID: pageID,
+            options: OCRDetectionOptions(preset: .standard, customFields: [])
         )
-        let nameCandidates = result.filter { $0.category == .name }
+    }
 
-        return splitNameLabelPart(for: "姓:") == .surname
-            && splitNameLabelPart(for: "姓；") == .surname
-            && splitNameLabelPart(for: "名：") == .givenName
-            && splitNameLabelPart(for: "名；") == .givenName
-            && !(labelRules.first { $0.category == .name }?.matches("使用协议名称：“Threshold 500Hz TB\"-打印于：2023-7-21 11:15:45") ?? true)
-            && !(labelRules.first { $0.category == .name }?.matches("名称") ?? true)
-            && splitGroups.count == 1
-            && splitGroups.first?.itemIndexes == Set([0, 1])
-            && !isLikelyValue("30岁", for: .name)
-            && !isLikelyValue("30", for: .name)
-            && !isLikelyValue("Age 30", for: .name)
-            && !isLikelyValue("三十岁", for: .name)
-            && result.contains { $0.category == .chineseID && $0.text == "11010119930320777X" }
-            && nameCandidates.count == 1
-            && nameCandidates.first?.text == missingValueText
-            && !result.contains { $0.category == .name && $0.text == "30岁" }
-            && !result.contains { $0.category == .age }
+    private static func debugRegressionResult(
+        _ caseName: String,
+        candidates: [OCRSensitiveCandidate],
+        passed: Bool
+    ) -> DebugStandardNameRegressionCaseResult {
+        DebugStandardNameRegressionCaseResult(
+            caseName: caseName,
+            passed: passed,
+            details: debugCandidateSummary(candidates)
+        )
+    }
+
+    private static func debugHasSingleNameFallback(
+        _ candidates: [OCRSensitiveCandidate],
+        missingValueText: String,
+        minimumWidth: Double,
+        minimumHeight: Double = 0.030
+    ) -> Bool {
+        let nameCandidates = candidates.filter { $0.category == .name }
+        guard nameCandidates.count == 1,
+              let nameCandidate = nameCandidates.first,
+              nameCandidate.text == missingValueText,
+              nameCandidate.detectionKind == .labelFallback else {
+            return false
+        }
+
+        return nameCandidate.boundingBox.width >= minimumWidth
+            && nameCandidate.boundingBox.height >= minimumHeight
+    }
+
+    private static func debugContains(
+        _ candidates: [OCRSensitiveCandidate],
+        category: OCRCandidateCategory,
+        text: String
+    ) -> Bool {
+        candidates.contains { $0.category == category && $0.text == text }
+    }
+
+    private static func debugCandidateSummary(_ candidates: [OCRSensitiveCandidate]) -> String {
+        if candidates.isEmpty {
+            return "[]"
+        }
+
+        return candidates
+            .map { "\($0.category.rawValue)/\($0.text)/\($0.detectionKind.rawValue)" }
+            .joined(separator: ", ")
     }
     #endif
 
@@ -1613,7 +1802,7 @@ struct DefaultOCRService: OCRService {
     private static func isLikelyHumanNameValue(_ text: String) -> Bool {
         let valueText = normalizedOCRValueText(text)
         let compactText = normalizedOCRLabelText(valueText)
-        let digits = valueText.filter(\.isNumber)
+        let asciiDigits = valueText.unicodeScalars.filter { (48...57).contains($0.value) }
 
         guard compactText.count >= 2,
               compactText.count <= 40,
@@ -1625,15 +1814,16 @@ struct DefaultOCRService: OCRService {
               !isPhoneLikeText(valueText),
               !isChineseIDLikeText(valueText),
               !isPureNumberLikeText(valueText),
+              !isForbiddenNameText(valueText),
               !isAddressLikeNameFalsePositive(valueText) else {
             return false
         }
 
-        if !digits.isEmpty {
+        if !asciiDigits.isEmpty {
             return false
         }
 
-        if valueText.range(of: #"^[\p{Han}·]{2,6}$"#, options: .regularExpression) != nil {
+        if valueText.range(of: #"^[一-龥·]{2,6}$"#, options: .regularExpression) != nil {
             return true
         }
 
@@ -1676,6 +1866,10 @@ struct DefaultOCRService: OCRService {
         let compact = normalizedOCRLabelText(text)
 
         return !compact.isEmpty && compact.allSatisfy(\.isNumber)
+    }
+
+    private static func isForbiddenNameText(_ text: String) -> Bool {
+        isForbiddenNameLabelText(text)
     }
 
     private static func isAddressLikeNameFalsePositive(_ text: String) -> Bool {
@@ -1748,7 +1942,7 @@ private struct OCRRecognitionInput {
 
 private struct OCRTextItem {
     let text: String
-    let recognizedText: VNRecognizedText
+    let recognizedText: VNRecognizedText?
     let boundingBox: NormalizedRect
     let confidence: Double
 }
@@ -1832,6 +2026,10 @@ private struct OCRLabelRule {
     let labelPatterns: [String]
 
     func matches(_ text: String) -> Bool {
+        if category == .name, isForbiddenNameLabelText(text) {
+            return false
+        }
+
         let normalized = normalizedOCRLabelText(text)
 
         return labelPatterns.contains { pattern in
@@ -1844,14 +2042,19 @@ private struct OCRLabelRule {
         }
     }
 
-    func inlineValueRange(in text: String) -> NSRange? {
+    func inlineValueRange(in text: String, allowsNameWithSpaces: Bool = false) -> NSRange? {
+        if category == .name, isForbiddenNameLabelText(text) {
+            return nil
+        }
+
         let nsText = text as NSString
         let fullRange = NSRange(location: 0, length: nsText.length)
 
         for pattern in labelPatterns.sorted(by: { $0.count > $1.count }) {
             let escapedPattern = NSRegularExpression.escapedPattern(for: pattern)
+            let valuePattern = category == .name && allowsNameWithSpaces ? "(.{1,80})" : #"([^\s:：]{1,80})"#
             let regex = try! NSRegularExpression(
-                pattern: "\(escapedPattern)\\s*[:：]?\\s*([^\\s:：]{1,80})",
+                pattern: "\(escapedPattern)\\s*[:：]?\\s*\(valuePattern)",
                 options: [.caseInsensitive]
             )
 
@@ -1947,6 +2150,16 @@ private let nameLabelPatterns: [String] = [
     "Name",
     "Patient Name",
     "Subject Name"
+]
+
+private let forbiddenNameLabelTexts: [String] = [
+    "使用协议名称",
+    "协议名称",
+    "项目名称",
+    "检查名称",
+    "医院名称",
+    "文件名称",
+    "名称"
 ]
 
 private let phoneLabelPatterns: [String] = [
@@ -2149,6 +2362,20 @@ private func normalizedOCRText(_ text: String) -> String {
         .replacingOccurrences(of: "_", with: "")
         .trimmingCharacters(in: .whitespacesAndNewlines)
         .lowercased()
+}
+
+private func isForbiddenNameLabelText(_ text: String) -> Bool {
+    let compact = normalizedOCRLabelText(text)
+
+    return forbiddenNameLabelTexts.contains { forbiddenLabel in
+        let forbidden = normalizedOCRLabelText(forbiddenLabel)
+
+        if forbidden == "名称" {
+            return compact == forbidden
+        }
+
+        return compact == forbidden || compact.hasPrefix(forbidden)
+    }
 }
 
 private func normalizedOCRLabelText(_ text: String) -> String {
