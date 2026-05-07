@@ -1,7 +1,9 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import ImageIO
 import PDFKit
+import UniformTypeIdentifiers
 import Vision
 
 protocol OCRService {
@@ -127,35 +129,37 @@ struct DefaultOCRService: OCRService {
         pageID: PageItem.ID,
         options: OCRDetectionOptions
     ) throws -> [OCRSensitiveCandidate] {
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.recognitionLanguages = ["zh-Hans", "en-US"]
-        request.usesLanguageCorrection = false
-
+        let observations: [VNRecognizedTextObservation]
         do {
-            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-            try handler.perform([request])
+            observations = try recognizedTextObservations(in: cgImage)
         } catch {
             throw OCRServiceError.recognitionFailed(error.localizedDescription)
         }
 
-        return buildCandidates(from: request.results ?? [], pageID: pageID, options: options)
+        return buildCandidates(
+            from: observations,
+            pageID: pageID,
+            options: options,
+            context: OCRProcessingContext(sourceImage: cgImage)
+        )
     }
 
     private static func buildCandidates(
         from observations: [VNRecognizedTextObservation],
         pageID: PageItem.ID,
-        options: OCRDetectionOptions
+        options: OCRDetectionOptions,
+        context: OCRProcessingContext = .empty
     ) -> [OCRSensitiveCandidate] {
         let textItems = recognizedTextItems(from: observations)
 
-        return buildCandidates(from: textItems, pageID: pageID, options: options)
+        return buildCandidates(from: textItems, pageID: pageID, options: options, context: context)
     }
 
     private static func buildCandidates(
         from textItems: [OCRTextItem],
         pageID: PageItem.ID,
-        options: OCRDetectionOptions
+        options: OCRDetectionOptions,
+        context: OCRProcessingContext = .empty
     ) -> [OCRSensitiveCandidate] {
         let includedCategories = options.includedCategories
         var candidates: [OCRSensitiveCandidate] = []
@@ -212,10 +216,22 @@ struct DefaultOCRService: OCRService {
             from: textItems,
             pageID: pageID,
             options: options,
+            context: context,
             to: &candidates
         )
 
         return finalizedCandidates(candidates, includedCategories: includedCategories)
+    }
+
+    private static func recognizedTextObservations(in cgImage: CGImage) throws -> [VNRecognizedTextObservation] {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["zh-Hans", "en-US"]
+        request.usesLanguageCorrection = false
+
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        try handler.perform([request])
+        return request.results ?? []
     }
 
     private static func recognizedTextItems(from observations: [VNRecognizedTextObservation]) -> [OCRTextItem] {
@@ -243,6 +259,7 @@ struct DefaultOCRService: OCRService {
         from textItems: [OCRTextItem],
         pageID: PageItem.ID,
         options: OCRDetectionOptions,
+        context: OCRProcessingContext,
         to candidates: inout [OCRSensitiveCandidate]
     ) {
         let includedCategories = options.includedCategories
@@ -250,6 +267,7 @@ struct DefaultOCRService: OCRService {
             from: textItems,
             pageID: pageID,
             options: options,
+            context: context,
             to: &candidates
         )
 
@@ -289,6 +307,7 @@ struct DefaultOCRService: OCRService {
         from textItems: [OCRTextItem],
         pageID: PageItem.ID,
         options: OCRDetectionOptions,
+        context: OCRProcessingContext,
         to candidates: inout [OCRSensitiveCandidate]
     ) -> Set<Int> {
         guard options.preset == .standard,
@@ -304,7 +323,8 @@ struct DefaultOCRService: OCRService {
                 group,
                 textItems: textItems,
                 pageID: pageID,
-                options: options
+                options: options,
+                context: context
             ) {
                 appendCandidate(candidate, to: &candidates)
             }
@@ -317,15 +337,16 @@ struct DefaultOCRService: OCRService {
 
     private static func splitNameLabelGroups(in textItems: [OCRTextItem]) -> [OCRSplitNameLabelGroup] {
         let splitItems = textItems.enumerated().compactMap { index, item -> OCRSplitNameLabelItem? in
-            guard let part = splitNameLabelPart(for: item.text) else {
+            guard let match = splitNameLabelMatch(for: item) else {
                 return nil
             }
 
             return OCRSplitNameLabelItem(
                 index: index,
-                part: part,
+                part: match.part,
                 boundingBox: item.boundingBox,
-                confidence: item.confidence
+                confidence: item.confidence,
+                inlineValue: match.inlineValue
             )
         }
 
@@ -363,7 +384,8 @@ struct DefaultOCRService: OCRService {
                     surnameBoundingBox: surname.boundingBox,
                     givenNameBoundingBox: givenName.boundingBox,
                     labelBoundingBox: unionRect(surname.boundingBox, givenName.boundingBox),
-                    confidence: min(surname.confidence, givenName.confidence)
+                    confidence: min(surname.confidence, givenName.confidence),
+                    inlineValues: [surname.inlineValue, givenName.inlineValue].compactMap(\.self)
                 )
                 groups.append(group)
                 consumedIndexes.insert(surname.index)
@@ -375,7 +397,8 @@ struct DefaultOCRService: OCRService {
                     surnameBoundingBox: surname.boundingBox,
                     givenNameBoundingBox: nil,
                     labelBoundingBox: surname.boundingBox,
-                    confidence: surname.confidence
+                    confidence: surname.confidence,
+                    inlineValues: [surname.inlineValue].compactMap(\.self)
                 )
                 groups.append(group)
                 consumedIndexes.insert(surname.index)
@@ -394,6 +417,88 @@ struct DefaultOCRService: OCRService {
         default:
             return nil
         }
+    }
+
+    private static func splitNameLabelMatch(
+        for item: OCRTextItem
+    ) -> (part: OCRSplitNameLabelPart, inlineValue: OCRSplitNameInlineValue?)? {
+        if let part = splitNameLabelPart(for: item.text) {
+            return (part, nil)
+        }
+
+        guard let inlineMatch = splitNameInlineValue(in: item) else {
+            return nil
+        }
+
+        return (inlineMatch.part, inlineMatch.value)
+    }
+
+    private static func splitNameInlineValue(
+        in item: OCRTextItem
+    ) -> (part: OCRSplitNameLabelPart, value: OCRSplitNameInlineValue)? {
+        let text = item.text
+        guard let labelIndex = text.firstIndex(where: { !$0.isWhitespace }) else {
+            return nil
+        }
+
+        let part: OCRSplitNameLabelPart
+        switch text[labelIndex] {
+        case "姓":
+            part = .surname
+        case "名":
+            part = .givenName
+        default:
+            return nil
+        }
+
+        var valueStart = text.index(after: labelIndex)
+        var sawSeparator = false
+        while valueStart < text.endIndex {
+            let character = text[valueStart]
+            if character.isWhitespace {
+                valueStart = text.index(after: valueStart)
+                continue
+            }
+
+            guard isSplitNameInlineSeparator(character) else {
+                break
+            }
+
+            sawSeparator = true
+            valueStart = text.index(after: valueStart)
+        }
+
+        guard sawSeparator, valueStart < text.endIndex else {
+            return nil
+        }
+
+        let rawValue = String(text[valueStart...])
+        let normalizedValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedValue.isEmpty,
+              likelyHumanNameDisplayValue(from: normalizedValue) != nil
+                  || likelyHumanNameComponent(from: normalizedValue) != nil else {
+            return nil
+        }
+
+        let valueRange = NSRange(valueStart..<text.endIndex, in: text)
+        let valueBox = appNormalizedRect(
+            for: valueRange,
+            in: item.recognizedText,
+            fallbackBounds: item.boundingBox
+        ) ?? item.boundingBox
+
+        return (
+            part,
+            OCRSplitNameInlineValue(
+                text: normalizedValue,
+                boundingBox: valueBox,
+                confidence: item.confidence
+            )
+        )
+    }
+
+    private static func isSplitNameInlineSeparator(_ character: Character) -> Bool {
+        [":", "：", ";", "；", "﹔"].contains(character)
     }
 
     nonisolated private static func splitNameLabelPrecedes(
@@ -488,7 +593,8 @@ struct DefaultOCRService: OCRService {
         _ group: OCRSplitNameLabelGroup,
         textItems: [OCRTextItem],
         pageID: PageItem.ID,
-        options: OCRDetectionOptions
+        options: OCRDetectionOptions,
+        context: OCRProcessingContext
     ) -> OCRSensitiveCandidate? {
         var searchBoxes = [
             group.labelBoundingBox,
@@ -496,6 +602,10 @@ struct DefaultOCRService: OCRService {
         ]
         if let givenNameBoundingBox = group.givenNameBoundingBox {
             searchBoxes.append(givenNameBoundingBox)
+        }
+
+        if let inlineCandidate = inlineSplitNameValueCandidate(group, pageID: pageID) {
+            return inlineCandidate
         }
 
         if let valueItem = nearestValueItem(
@@ -523,6 +633,14 @@ struct DefaultOCRService: OCRService {
             return candidate
         }
 
+        if let roiCandidate = splitNameROIValueCandidate(
+            group,
+            pageID: pageID,
+            context: context
+        ) {
+            return roiCandidate
+        }
+
         let fallbackBox = likelySplitNameFillArea(for: group)
         guard allowsLabelFallback(
             for: .name,
@@ -542,6 +660,71 @@ struct DefaultOCRService: OCRService {
             detectionKind: .labelFallback
         )
         return candidate
+    }
+
+    private static func inlineSplitNameValueCandidate(
+        _ group: OCRSplitNameLabelGroup,
+        pageID: PageItem.ID
+    ) -> OCRSensitiveCandidate? {
+        guard !group.inlineValues.isEmpty else {
+            return nil
+        }
+
+        let directCandidates = group.inlineValues.compactMap { inlineValue -> OCRSensitiveCandidate? in
+            guard let nameValue = likelyHumanNameDisplayValue(from: inlineValue.text) else {
+                return nil
+            }
+
+            return OCRSensitiveCandidate(
+                pageID: pageID,
+                text: nameValue,
+                category: .name,
+                confidence: min(group.confidence, inlineValue.confidence),
+                boundingBox: inlineValue.boundingBox.padded(horizontal: 0.003, vertical: 0.004),
+                labelBoundingBox: group.labelBoundingBox,
+                detectionKind: .labelValue
+            )
+        }
+
+        if let candidate = directCandidates
+            .sorted(by: { left, right in
+                normalizedOCRLabelText(left.text).count > normalizedOCRLabelText(right.text).count
+            })
+            .first {
+            return candidate
+        }
+
+        let components = group.inlineValues.compactMap { inlineValue -> (value: String, box: NormalizedRect, confidence: Double)? in
+            guard let component = likelyHumanNameComponent(from: inlineValue.text) else {
+                return nil
+            }
+
+            return (component, inlineValue.boundingBox, inlineValue.confidence)
+        }
+
+        guard components.count >= 2 else {
+            return nil
+        }
+
+        let combinedValue = components.map(\.value).joined()
+        guard let nameValue = likelyHumanNameDisplayValue(from: combinedValue) else {
+            return nil
+        }
+
+        var combinedBox = components[0].box
+        for component in components.dropFirst() {
+            combinedBox = unionRect(combinedBox, component.box)
+        }
+
+        return OCRSensitiveCandidate(
+            pageID: pageID,
+            text: nameValue,
+            category: .name,
+            confidence: min(group.confidence, components.map(\.confidence).min() ?? group.confidence),
+            boundingBox: combinedBox.padded(horizontal: 0.003, vertical: 0.004),
+            labelBoundingBox: group.labelBoundingBox,
+            detectionKind: .labelValue
+        )
     }
 
     private static func candidateNearLabel(
@@ -808,6 +991,261 @@ struct DefaultOCRService: OCRService {
             height: height
         )
         .clamped()
+    }
+
+    private static func likelySplitNameOCRRegion(for group: OCRSplitNameLabelGroup) -> NormalizedRect {
+        let labelBoxes = [group.surnameBoundingBox, group.givenNameBoundingBox].compactMap(\.self)
+        let labelBox = group.labelBoundingBox
+        let rightEdge = labelBoxes.map(\.maxX).max() ?? labelBox.maxX
+        let rowHeight = labelBoxes.map(\.height).max() ?? labelBox.height
+        let gap = max(0.010, rowHeight * 0.35)
+        let x = min(rightEdge + gap, 0.94)
+        let width = min(max(0.34, labelBox.width * 4.0), 0.44, 0.98 - x)
+
+        if group.givenNameBoundingBox != nil {
+            let y = max(labelBox.y - max(rowHeight * 1.40, 0.025), 0)
+            let height = min(max(labelBox.height + rowHeight * 5.00, 0.180), 0.26, 1 - y)
+            return NormalizedRect(x: x, y: y, width: width, height: height).clamped()
+        }
+
+        let y = max(group.surnameBoundingBox.y - max(rowHeight * 1.40, 0.025), 0)
+        let height = min(max(rowHeight * 8.0, 0.20), 0.28, 1 - y)
+        return NormalizedRect(x: x, y: y, width: width, height: height).clamped()
+    }
+
+    private static func splitNameROIValueCandidate(
+        _ group: OCRSplitNameLabelGroup,
+        pageID: PageItem.ID,
+        context: OCRProcessingContext
+    ) -> OCRSensitiveCandidate? {
+        guard let sourceImage = context.sourceImage else {
+            return nil
+        }
+
+        let roiBox = likelySplitNameOCRRegion(for: group)
+        guard let croppedImage = croppedImage(sourceImage, to: roiBox) else {
+            return nil
+        }
+
+        if let candidate = splitNameROIValueCandidate(
+            in: croppedImage,
+            roiBox: roiBox,
+            group: group,
+            pageID: pageID
+        ) {
+            return candidate
+        }
+
+        guard let scaledImage = scaledImage(croppedImage, scale: 3) else {
+            return nil
+        }
+
+        return splitNameROIValueCandidate(
+            in: scaledImage,
+            roiBox: roiBox,
+            group: group,
+            pageID: pageID
+        )
+    }
+
+    private static func splitNameROIValueCandidate(
+        in roiImage: CGImage,
+        roiBox: NormalizedRect,
+        group: OCRSplitNameLabelGroup,
+        pageID: PageItem.ID
+    ) -> OCRSensitiveCandidate? {
+        guard let observations = try? recognizedTextObservations(in: roiImage) else {
+            return nil
+        }
+
+        let roiItems = recognizedTextItems(from: observations)
+            .map { item in
+                OCRTextItem(
+                    text: item.text,
+                    recognizedText: nil,
+                    boundingBox: pageRect(from: item.boundingBox, in: roiBox),
+                    confidence: item.confidence
+                )
+            }
+
+        return splitNameROIValueCandidate(
+            from: roiItems,
+            group: group,
+            pageID: pageID
+        )
+    }
+
+    private static func splitNameROIValueCandidate(
+        from roiItems: [OCRTextItem],
+        group: OCRSplitNameLabelGroup,
+        pageID: PageItem.ID
+    ) -> OCRSensitiveCandidate? {
+        var candidates = roiItems.compactMap { item -> OCRSensitiveCandidate? in
+            guard let nameValue = likelyHumanNameDisplayValue(from: item.text) else {
+                return nil
+            }
+
+            return OCRSensitiveCandidate(
+                pageID: pageID,
+                text: nameValue,
+                category: .name,
+                confidence: min(group.confidence, item.confidence),
+                boundingBox: item.boundingBox.padded(horizontal: 0.003, vertical: 0.004),
+                labelBoundingBox: group.labelBoundingBox,
+                detectionKind: .labelValue
+            )
+        }
+
+        if let combinedCandidate = combinedSplitNameROIComponentCandidate(
+            from: roiItems,
+            group: group,
+            pageID: pageID
+        ) {
+            candidates.append(combinedCandidate)
+        }
+
+        return candidates
+            .sorted { left, right in
+                let leftLength = normalizedOCRLabelText(left.text).count
+                let rightLength = normalizedOCRLabelText(right.text).count
+                if leftLength != rightLength {
+                    return leftLength > rightLength
+                }
+
+                return (left.confidence ?? 0) > (right.confidence ?? 0)
+            }
+            .first
+    }
+
+    private static func combinedSplitNameROIComponentCandidate(
+        from roiItems: [OCRTextItem],
+        group: OCRSplitNameLabelGroup,
+        pageID: PageItem.ID
+    ) -> OCRSensitiveCandidate? {
+        let components = roiItems
+            .compactMap { item -> (value: String, box: NormalizedRect, confidence: Double)? in
+                guard let value = likelyHumanNameComponent(from: item.text) else {
+                    return nil
+                }
+
+                return (value, item.boundingBox, item.confidence)
+            }
+            .sorted(by: splitNameROIComponentPrecedes)
+
+        guard components.count >= 2 else {
+            return nil
+        }
+
+        let combinedValue = components.map(\.value).joined()
+        guard let nameValue = likelyHumanNameDisplayValue(from: combinedValue) else {
+            return nil
+        }
+
+        var combinedBox = components[0].box
+        for component in components.dropFirst() {
+            combinedBox = unionNormalizedRects(combinedBox, component.box)
+        }
+
+        return OCRSensitiveCandidate(
+            pageID: pageID,
+            text: nameValue,
+            category: .name,
+            confidence: min(group.confidence, components.map(\.confidence).min() ?? group.confidence),
+            boundingBox: combinedBox.padded(horizontal: 0.003, vertical: 0.004),
+            labelBoundingBox: group.labelBoundingBox,
+            detectionKind: .labelValue
+        )
+    }
+
+    nonisolated private static func splitNameROIComponentPrecedes(
+        _ left: (value: String, box: NormalizedRect, confidence: Double),
+        _ right: (value: String, box: NormalizedRect, confidence: Double)
+    ) -> Bool {
+        let rowHeight = max(left.box.height, right.box.height)
+        let leftCenterY = left.box.y + left.box.height / 2
+        let rightCenterY = right.box.y + right.box.height / 2
+        let sameRow = abs(leftCenterY - rightCenterY) <= max(rowHeight * 0.85, 0.020)
+
+        if sameRow, left.box.x != right.box.x {
+            return left.box.x < right.box.x
+        }
+
+        if left.box.y != right.box.y {
+            return left.box.y < right.box.y
+        }
+
+        return left.box.x < right.box.x
+    }
+
+    private static func unionNormalizedRects(
+        _ left: NormalizedRect,
+        _ right: NormalizedRect
+    ) -> NormalizedRect {
+        let minX = min(left.x, right.x)
+        let minY = min(left.y, right.y)
+        let maxX = max(left.x + left.width, right.x + right.width)
+        let maxY = max(left.y + left.height, right.y + right.height)
+
+        return NormalizedRect(
+            x: minX,
+            y: minY,
+            width: maxX - minX,
+            height: maxY - minY
+        )
+        .clamped()
+    }
+
+    private static func pageRect(from localRect: NormalizedRect, in roiBox: NormalizedRect) -> NormalizedRect {
+        NormalizedRect(
+            x: roiBox.x + localRect.x * roiBox.width,
+            y: roiBox.y + localRect.y * roiBox.height,
+            width: localRect.width * roiBox.width,
+            height: localRect.height * roiBox.height
+        )
+        .clamped()
+    }
+
+    private static func croppedImage(_ sourceImage: CGImage, to normalizedRect: NormalizedRect) -> CGImage? {
+        let imageBounds = CGRect(x: 0, y: 0, width: sourceImage.width, height: sourceImage.height)
+        let cropRect = CGRect(
+            x: normalizedRect.x * Double(sourceImage.width),
+            y: normalizedRect.y * Double(sourceImage.height),
+            width: normalizedRect.width * Double(sourceImage.width),
+            height: normalizedRect.height * Double(sourceImage.height)
+        )
+        .integral
+        .intersection(imageBounds)
+
+        guard cropRect.width >= 2, cropRect.height >= 2 else {
+            return nil
+        }
+
+        return sourceImage.cropping(to: cropRect)
+    }
+
+    private static func scaledImage(_ sourceImage: CGImage, scale: Int) -> CGImage? {
+        guard scale > 1 else {
+            return sourceImage
+        }
+
+        let width = sourceImage.width * scale
+        let height = sourceImage.height * scale
+        let colorSpace = sourceImage.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return nil
+        }
+
+        context.interpolationQuality = .high
+        context.draw(sourceImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
     }
 
     private static func appNormalizedRect(
@@ -1182,58 +1620,54 @@ struct DefaultOCRService: OCRService {
         let missingValueText = L10n.Review.ocrNoExplicitValue
         let surnameLabelBox = NormalizedRect(x: 0.10, y: 0.10, width: 0.035, height: 0.018)
         let givenNameLabelBox = NormalizedRect(x: 0.10, y: 0.135, width: 0.035, height: 0.018)
-        let ageValueBox = NormalizedRect(x: 0.20, y: 0.135, width: 0.050, height: 0.018)
-        let idLabelBox = NormalizedRect(x: 0.10, y: 0.205, width: 0.070, height: 0.018)
-        let idValueBox = NormalizedRect(x: 0.20, y: 0.205, width: 0.220, height: 0.018)
-        let idValue = "420117199303207538"
-        let splitGroups = splitNameLabelGroups(
-            from: [
-                OCRSplitNameLabelItem(
-                    index: 0,
-                    part: .surname,
-                    boundingBox: surnameLabelBox,
-                    confidence: 0.90
-                ),
-                OCRSplitNameLabelItem(
-                    index: 1,
-                    part: .givenName,
-                    boundingBox: givenNameLabelBox,
-                    confidence: 0.90
-                )
-            ]
-        )
+        let splitValueBox = NormalizedRect(x: 0.18, y: 0.116, width: 0.070, height: 0.030)
+        let combinedValueCases = [
+            "姓名：张三",
+            "患者姓名：张三",
+            "病人姓名：张三",
+            "受检者：张三",
+            "受检人：张三"
+        ].map { text in
+            debugStandardCandidates(
+                pageID: pageID,
+                textItems: [
+                    debugTextItem(text, box: NormalizedRect(x: 0.10, y: 0.10, width: 0.180, height: 0.018))
+                ]
+            )
+        }
 
-        let case1 = debugStandardCandidates(
-            pageID: pageID,
-            textItems: [
-                debugTextItem("姓:", box: surnameLabelBox),
-                debugTextItem("名:", box: givenNameLabelBox),
-                debugTextItem("30岁", box: ageValueBox),
-                debugTextItem("身份证号", box: idLabelBox),
-                debugTextItem(idValue, box: idValueBox)
-            ]
-        )
-        let case2 = debugStandardCandidates(
-            pageID: pageID,
-            textItems: [
-                debugTextItem("姓；", box: surnameLabelBox),
-                debugTextItem("身份证号", box: idLabelBox),
-                debugTextItem(idValue, box: idValueBox)
-            ]
-        )
-        let case3 = debugStandardCandidates(
-            pageID: pageID,
-            textItems: [
-                debugTextItem("姓名：张三", box: NormalizedRect(x: 0.10, y: 0.10, width: 0.180, height: 0.018))
-            ]
-        )
-        let case4 = debugStandardCandidates(
+        let combinedWithoutValue = debugStandardCandidates(
             pageID: pageID,
             textItems: [
                 debugTextItem("姓名：", box: NormalizedRect(x: 0.10, y: 0.10, width: 0.055, height: 0.018))
             ]
         )
-        let case5 = debugStandardCandidates(
+        let splitWholePageValue = debugStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                debugTextItem("姓：", box: surnameLabelBox),
+                debugTextItem("名：", box: givenNameLabelBox),
+                debugTextItem("张三", box: splitValueBox)
+            ]
+        )
+        let splitROISourceImage = debugSyntheticSplitNameROIImage(includeName: true)
+        let splitROICandidates = debugStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                debugTextItem("姓；", box: surnameLabelBox),
+                debugTextItem("名；", box: givenNameLabelBox)
+            ],
+            sourceImage: splitROISourceImage
+        )
+        let splitROIFallback = debugStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                debugTextItem("姓；", box: surnameLabelBox),
+                debugTextItem("名；", box: givenNameLabelBox)
+            ],
+            sourceImage: debugSyntheticSplitNameROIImage(includeName: false)
+        )
+        let falsePositiveLabel = debugStandardCandidates(
             pageID: pageID,
             textItems: [
                 debugTextItem(
@@ -1242,14 +1676,14 @@ struct DefaultOCRService: OCRService {
                 )
             ]
         )
-        let case6 = debugStandardCandidates(
+        let invalidNameValue = debugStandardCandidates(
             pageID: pageID,
             textItems: [
                 debugTextItem("姓名：", box: NormalizedRect(x: 0.10, y: 0.10, width: 0.055, height: 0.018)),
                 debugTextItem("30岁", box: NormalizedRect(x: 0.20, y: 0.10, width: 0.050, height: 0.018))
             ]
         )
-        let case7 = debugStandardCandidates(
+        let standardScope = debugStandardCandidates(
             pageID: pageID,
             textItems: [
                 debugTextItem("年龄：30岁", box: NormalizedRect(x: 0.10, y: 0.10, width: 0.100, height: 0.018)),
@@ -1261,56 +1695,57 @@ struct DefaultOCRService: OCRService {
 
         return [
             debugRegressionResult(
-                "Case 1",
-                candidates: case1,
-                passed: splitNameLabelPart(for: "姓:") == .surname
-                    && splitNameLabelPart(for: "名:") == .givenName
-                    && splitGroups.count == 1
-                    && splitGroups.first?.itemIndexes == Set([0, 1])
-                    && debugHasSingleNameFallback(case1, missingValueText: missingValueText, minimumWidth: 0.20, minimumHeight: 0.045)
-                    && debugContains(case1, category: .chineseID, text: idValue)
-                    && case1.count == 2
-                    && !debugContains(case1, category: .name, text: "30岁")
-                    && !case1.contains { $0.category == .age }
+                "Case 1 combined label with value",
+                candidates: combinedValueCases.flatMap(\.self),
+                passed: combinedValueCases.allSatisfy {
+                    $0.count == 1 && debugContains($0, category: .name, text: "张三")
+                }
             ),
             debugRegressionResult(
-                "Case 2",
-                candidates: case2,
-                passed: splitNameLabelPart(for: "姓；") == .surname
-                    && debugHasSingleNameFallback(case2, missingValueText: missingValueText, minimumWidth: 0.20)
-                    && debugContains(case2, category: .chineseID, text: idValue)
-                    && case2.count == 2
+                "Case 2 combined label without value",
+                candidates: combinedWithoutValue,
+                passed: combinedWithoutValue.count == 1
+                    && debugHasSingleNameFallback(combinedWithoutValue, missingValueText: missingValueText, minimumWidth: 0.20)
             ),
             debugRegressionResult(
-                "Case 3",
-                candidates: case3,
-                passed: case3.count == 1
-                    && debugContains(case3, category: .name, text: "张三")
+                "Case 3 split label whole-page value",
+                candidates: splitWholePageValue,
+                passed: splitNameLabelPart(for: "姓：") == .surname
+                    && splitNameLabelPart(for: "名：") == .givenName
+                    && splitWholePageValue.count == 1
+                    && debugContains(splitWholePageValue, category: .name, text: "张三")
             ),
             debugRegressionResult(
-                "Case 4",
-                candidates: case4,
-                passed: case4.count == 1
-                    && debugHasSingleNameFallback(case4, missingValueText: missingValueText, minimumWidth: 0.20)
+                "Case 4 split label ROI value extraction",
+                candidates: splitROICandidates,
+                passed: splitROICandidates.count == 1
+                    && debugContains(splitROICandidates, category: .name, text: "张三")
             ),
             debugRegressionResult(
-                "Case 5",
-                candidates: case5,
-                passed: case5.isEmpty
+                "Case 5 split label ROI fallback only",
+                candidates: splitROIFallback,
+                passed: splitROIFallback.count == 1
+                    && debugHasSingleNameFallback(splitROIFallback, missingValueText: missingValueText, minimumWidth: 0.20),
+                detailsSuffix: "Fallback only after ROI failure"
+            ),
+            debugRegressionResult(
+                "Case 6 false positive label",
+                candidates: falsePositiveLabel,
+                passed: falsePositiveLabel.isEmpty
                     && !(labelRules.first { $0.category == .name }?.matches("使用协议名称：“Threshold 500Hz TB\"-打印于：2023-7-21 11:15:45") ?? true)
                     && !(labelRules.first { $0.category == .name }?.matches("名称") ?? true)
             ),
             debugRegressionResult(
-                "Case 6",
-                candidates: case6,
-                passed: case6.count == 1
-                    && debugHasSingleNameFallback(case6, missingValueText: missingValueText, minimumWidth: 0.20)
-                    && !debugContains(case6, category: .name, text: "30岁")
+                "Case 7 invalid name value",
+                candidates: invalidNameValue,
+                passed: invalidNameValue.count == 1
+                    && debugHasSingleNameFallback(invalidNameValue, missingValueText: missingValueText, minimumWidth: 0.20)
+                    && !debugContains(invalidNameValue, category: .name, text: "30岁")
             ),
             debugRegressionResult(
-                "Case 7",
-                candidates: case7,
-                passed: case7.isEmpty
+                "Case 8 Standard scope",
+                candidates: standardScope,
+                passed: standardScope.isEmpty
                     && !isLikelyValue("30岁", for: .name)
                     && !isLikelyValue("30", for: .name)
                     && !isLikelyValue("Age 30", for: .name)
@@ -1320,11 +1755,13 @@ struct DefaultOCRService: OCRService {
                     && !isLikelyValue("M", for: .name)
                     && !isLikelyValue("F", for: .name)
                     && !isLikelyValue("中国", for: .name)
-                    && !isLikelyValue(idValue, for: .name)
+                    && !isLikelyValue("420117199303207538", for: .name)
                     && !isLikelyValue("test@example.com", for: .name)
                     && !isLikelyValue("13800138000", for: .name)
                     && !isLikelyValue("1993-03-20", for: .name)
                     && !isLikelyValue("项目名称", for: .name)
+                    && !isLikelyValue("Threshold", for: .name)
+                    && !isLikelyValue("ABR", for: .name)
             )
         ]
     }
@@ -1335,25 +1772,92 @@ struct DefaultOCRService: OCRService {
 
     private static func debugStandardCandidates(
         pageID: PageItem.ID,
-        textItems: [OCRTextItem]
+        textItems: [OCRTextItem],
+        sourceImage: CGImage? = nil
     ) -> [OCRSensitiveCandidate] {
         buildCandidates(
             from: textItems,
             pageID: pageID,
-            options: OCRDetectionOptions(preset: .standard, customFields: [])
+            options: OCRDetectionOptions(preset: .standard, customFields: []),
+            context: OCRProcessingContext(sourceImage: sourceImage)
         )
     }
 
     private static func debugRegressionResult(
         _ caseName: String,
         candidates: [OCRSensitiveCandidate],
-        passed: Bool
+        passed: Bool,
+        detailsSuffix: String? = nil
     ) -> DebugStandardNameRegressionCaseResult {
-        DebugStandardNameRegressionCaseResult(
+        let details = [debugCandidateSummary(candidates), detailsSuffix]
+            .compactMap { $0 }
+            .joined(separator: "; ")
+
+        return DebugStandardNameRegressionCaseResult(
             caseName: caseName,
             passed: passed,
-            details: debugCandidateSummary(candidates)
+            details: details
         )
+    }
+
+    static func debugSyntheticSplitNamePipelineImageURL() -> URL? {
+        let url = URL(fileURLWithPath: "/private/tmp/MedMaskSyntheticSplitName.jpg")
+        guard let image = debugSyntheticSplitNamePipelineImage(),
+              let destination = CGImageDestinationCreateWithURL(
+                  url as CFURL,
+                  UTType.jpeg.identifier as CFString,
+                  1,
+                  nil
+              ) else {
+            return nil
+        }
+
+        let options = [
+            kCGImageDestinationLossyCompressionQuality: 0.95
+        ] as CFDictionary
+        CGImageDestinationAddImage(destination, image, options)
+        guard CGImageDestinationFinalize(destination) else {
+            return nil
+        }
+
+        return url
+    }
+
+    private static func debugSyntheticSplitNameROIImage(includeName: Bool) -> CGImage? {
+        debugSyntheticSplitNameImage(includeLabels: false, includeName: includeName)
+    }
+
+    private static func debugSyntheticSplitNamePipelineImage() -> CGImage? {
+        debugSyntheticSplitNameImage(includeLabels: true, includeName: true)
+    }
+
+    private static func debugSyntheticSplitNameImage(includeLabels: Bool, includeName: Bool) -> CGImage? {
+        let size = CGSize(width: 1200, height: 800)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.white.setFill()
+        NSRect(origin: .zero, size: size).fill()
+
+        let labelAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 54, weight: .regular),
+            .foregroundColor: NSColor.black
+        ]
+        let valueAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 66, weight: .medium),
+            .foregroundColor: NSColor.black
+        ]
+
+        if includeLabels {
+            ("姓：" as NSString).draw(at: CGPoint(x: 120, y: 800 - 145), withAttributes: labelAttributes)
+            ("名：" as NSString).draw(at: CGPoint(x: 120, y: 800 - 245), withAttributes: labelAttributes)
+        }
+
+        if includeName {
+            ("张三" as NSString).draw(at: CGPoint(x: 280, y: 800 - 188), withAttributes: valueAttributes)
+        }
+
+        image.unlockFocus()
+        return image.cgImageValue
     }
 
     private static func debugHasSingleNameFallback(
@@ -1823,7 +2327,7 @@ struct DefaultOCRService: OCRService {
             return false
         }
 
-        if valueText.range(of: #"^[一-龥·]{2,6}$"#, options: .regularExpression) != nil {
+        if compactText.range(of: #"^[一-龥·]{2,6}$"#, options: .regularExpression) != nil {
             return true
         }
 
@@ -1831,6 +2335,59 @@ struct DefaultOCRService: OCRService {
             of: #"(?i)^[A-Z][A-Z'\-]{1,24}(?:\s+[A-Z][A-Z'\-]{1,24}){0,3}$"#,
             options: .regularExpression
         ) != nil
+    }
+
+    private static func likelyHumanNameDisplayValue(from text: String) -> String? {
+        for match in targetRules.filter({ $0.category == .name }).flatMap({ $0.matches(in: text) }) {
+            if let value = likelyHumanNameDisplayValueFromRawValue(match.text) {
+                return value
+            }
+        }
+
+        if let nameLabelRule = labelRules.first(where: { $0.category == .name }),
+           let valueRange = nameLabelRule.inlineValueRange(in: text, allowsNameWithSpaces: true) {
+            let inlineText = (text as NSString)
+                .substring(with: valueRange)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let value = likelyHumanNameDisplayValueFromRawValue(inlineText) {
+                return value
+            }
+        }
+
+        return likelyHumanNameDisplayValueFromRawValue(text)
+    }
+
+    private static func likelyHumanNameDisplayValueFromRawValue(_ text: String) -> String? {
+        let valueText = normalizedOCRValueText(text)
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ":：;；,，.。\"'“”‘’()（）[]【】")))
+        let compactText = normalizedOCRLabelText(valueText)
+
+        guard isLikelyHumanNameValue(valueText),
+              !compactText.isEmpty else {
+            return nil
+        }
+
+        if compactText.range(of: #"^[一-龥·]{2,6}$"#, options: .regularExpression) != nil {
+            return compactText
+        }
+
+        return valueText
+    }
+
+    private static func likelyHumanNameComponent(from text: String) -> String? {
+        let compactText = normalizedOCRLabelText(text)
+
+        guard compactText.range(of: #"^[一-龥·]{1,3}$"#, options: .regularExpression) != nil,
+              splitNameLabelPart(for: text) == nil,
+              !isKnownLabelOnlyText(text),
+              !isForbiddenNameText(text),
+              !isAgeLikeText(text),
+              !isGenderLikeText(text),
+              !isAddressLikeNameFalsePositive(text) else {
+            return nil
+        }
+
+        return compactText
     }
 
     private static func isAgeLikeText(_ text: String) -> Bool {
@@ -1869,7 +2426,7 @@ struct DefaultOCRService: OCRService {
     }
 
     private static func isForbiddenNameText(_ text: String) -> Bool {
-        isForbiddenNameLabelText(text)
+        isForbiddenNameValueText(text)
     }
 
     private static func isAddressLikeNameFalsePositive(_ text: String) -> Bool {
@@ -1940,6 +2497,12 @@ private struct OCRRecognitionInput {
     let cgImage: CGImage
 }
 
+private struct OCRProcessingContext {
+    let sourceImage: CGImage?
+
+    static let empty = OCRProcessingContext(sourceImage: nil)
+}
+
 private struct OCRTextItem {
     let text: String
     let recognizedText: VNRecognizedText?
@@ -1957,6 +2520,7 @@ private struct OCRSplitNameLabelItem {
     let part: OCRSplitNameLabelPart
     let boundingBox: NormalizedRect
     let confidence: Double
+    let inlineValue: OCRSplitNameInlineValue?
 }
 
 private struct OCRSplitNameLabelGroup {
@@ -1966,6 +2530,7 @@ private struct OCRSplitNameLabelGroup {
     let givenNameBoundingBox: NormalizedRect?
     let labelBoundingBox: NormalizedRect
     let confidence: Double
+    let inlineValues: [OCRSplitNameInlineValue]
 
     var itemIndexes: Set<Int> {
         var indexes = Set([surnameIndex])
@@ -1974,6 +2539,12 @@ private struct OCRSplitNameLabelGroup {
         }
         return indexes
     }
+}
+
+private struct OCRSplitNameInlineValue {
+    let text: String
+    let boundingBox: NormalizedRect
+    let confidence: Double
 }
 
 private struct OCRDateBinding {
@@ -2160,6 +2731,18 @@ private let forbiddenNameLabelTexts: [String] = [
     "医院名称",
     "文件名称",
     "名称"
+]
+
+private let forbiddenNameValueTexts: [String] = forbiddenNameLabelTexts + [
+    "地址",
+    "性别",
+    "年龄",
+    "生日",
+    "证件号",
+    "身份证号",
+    "使用协议",
+    "Threshold",
+    "ABR"
 ]
 
 private let phoneLabelPatterns: [String] = [
@@ -2371,6 +2954,20 @@ private func isForbiddenNameLabelText(_ text: String) -> Bool {
         let forbidden = normalizedOCRLabelText(forbiddenLabel)
 
         if forbidden == "名称" {
+            return compact == forbidden
+        }
+
+        return compact == forbidden || compact.hasPrefix(forbidden)
+    }
+}
+
+private func isForbiddenNameValueText(_ text: String) -> Bool {
+    let compact = normalizedOCRLabelText(text)
+
+    return forbiddenNameValueTexts.contains { forbiddenText in
+        let forbidden = normalizedOCRLabelText(forbiddenText)
+
+        if forbidden == "名称" || forbidden == "abr" || forbidden == "threshold" {
             return compact == forbidden
         }
 
