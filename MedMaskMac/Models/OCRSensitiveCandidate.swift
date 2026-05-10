@@ -108,6 +108,7 @@ struct OCRSensitiveCandidate: Identifiable, Hashable {
     let pageID: PageItem.ID
     var text: String
     var category: OCRCandidateCategory
+    var sourceLabelText: String?
     var confidence: Double?
     var boundingBox: NormalizedRect
     var labelBoundingBox: NormalizedRect?
@@ -121,6 +122,7 @@ struct OCRSensitiveCandidate: Identifiable, Hashable {
         pageID: PageItem.ID,
         text: String,
         category: OCRCandidateCategory,
+        sourceLabelText: String? = nil,
         confidence: Double? = nil,
         boundingBox: NormalizedRect,
         labelBoundingBox: NormalizedRect? = nil,
@@ -133,6 +135,7 @@ struct OCRSensitiveCandidate: Identifiable, Hashable {
         self.pageID = pageID
         self.text = text
         self.category = category
+        self.sourceLabelText = sourceLabelText
         self.confidence = confidence
         self.boundingBox = boundingBox
         self.labelBoundingBox = labelBoundingBox
@@ -140,5 +143,14 @@ struct OCRSensitiveCandidate: Identifiable, Hashable {
         self.status = status
         self.linkedRegionID = linkedRegionID
         self.orderIndex = orderIndex
+    }
+
+    var displayTitle: String {
+        guard let sourceLabelText,
+              !sourceLabelText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return category.displayTitle
+        }
+
+        return sourceLabelText
     }
 }

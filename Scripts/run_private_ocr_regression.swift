@@ -77,7 +77,7 @@ struct PrivateOCRRegressionMain {
                 print("  none")
             } else {
                 for candidate in result.candidateSummaries {
-                    print("  category=\(candidate.category) detectionKind=\(candidate.detectionKind) value=\(candidate.redactedValue) box=\(candidate.boundingBox)")
+                    print("  title=\(candidate.displayTitle) category=\(candidate.category) detectionKind=\(candidate.detectionKind) value=\(candidate.redactedValue) box=\(candidate.boundingBox)")
                 }
             }
             print("exactlyOneNameCandidate=\(result.exactlyOneNameCandidate)")

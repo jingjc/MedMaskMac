@@ -1125,6 +1125,10 @@ final class AppViewModel: ObservableObject {
             return incoming
         }
 
+        if (existing.sourceLabelText?.isEmpty == false) != (incoming.sourceLabelText?.isEmpty == false) {
+            return incoming.sourceLabelText?.isEmpty == false ? incoming : existing
+        }
+
         let existingHasExplicitValue = existing.detectionKind != .labelFallback
         let incomingHasExplicitValue = incoming.detectionKind != .labelFallback
 

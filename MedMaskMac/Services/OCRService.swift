@@ -48,6 +48,7 @@ enum PrivateOCRRegressionClassification: String {
 
 struct PrivateOCRRegressionCandidateSummary {
     let category: String
+    let displayTitle: String
     let detectionKind: String
     let boundingBox: String
     let redactedValue: String
@@ -220,6 +221,7 @@ struct DefaultOCRService: OCRService {
                     guard let bounds = appNormalizedRect(
                         for: targetRange,
                         in: item.recognizedText,
+                        text: item.text,
                         fallbackBounds: item.boundingBox
                     ) else {
                         continue
@@ -238,6 +240,13 @@ struct DefaultOCRService: OCRService {
                     guard includedCategories.contains(category) else {
                         continue
                     }
+                    let sourceLabel = dateBinding == nil
+                        ? sourceLabelObservation(
+                            for: category,
+                            in: item,
+                            before: targetRange
+                        )
+                        : nil
 
                     debugLogDateBinding(
                         valueText: match.text,
@@ -250,9 +259,10 @@ struct DefaultOCRService: OCRService {
                             pageID: pageID,
                             text: displayText(match.text, for: category),
                             category: category,
+                            sourceLabelText: sourceLabel?.title,
                             confidence: item.confidence,
                             boundingBox: bounds.padded(horizontal: 0.003, vertical: 0.004),
-                            labelBoundingBox: dateBinding?.labelBoundingBox,
+                            labelBoundingBox: dateBinding?.labelBoundingBox ?? sourceLabel?.boundingBox,
                             detectionKind: dateBinding == nil ? .directValue : .labelValue
                         ),
                         to: &candidates
@@ -392,6 +402,7 @@ struct DefaultOCRService: OCRService {
                 let candidate = candidateNearLabel(
                     labelRule: labelRule,
                     labelItem: labelItem,
+                    labelIndex: labelIndex,
                     textItems: textItems,
                     pageID: pageID,
                     options: options
@@ -625,6 +636,7 @@ struct DefaultOCRService: OCRService {
         let valueBox = appNormalizedRect(
             for: valueRange,
             in: item.recognizedText,
+            text: item.text,
             fallbackBounds: item.boundingBox
         ) ?? item.boundingBox
 
@@ -758,6 +770,14 @@ struct DefaultOCRService: OCRService {
             return roiCandidate
         }
 
+        if let fallbackROICandidate = splitNameFallbackROIValueCandidate(
+            group,
+            pageID: pageID,
+            context: context
+        ) {
+            return fallbackROICandidate
+        }
+
         let fallbackBox = likelySplitNameFillArea(for: group)
         guard allowsLabelFallback(
             for: .name,
@@ -771,6 +791,7 @@ struct DefaultOCRService: OCRService {
             pageID: pageID,
             text: L10n.Review.ocrNoExplicitValue,
             category: .name,
+            sourceLabelText: "姓名",
             confidence: group.confidence,
             boundingBox: fallbackBox,
             labelBoundingBox: group.labelBoundingBox,
@@ -948,6 +969,7 @@ struct DefaultOCRService: OCRService {
             pageID: pageID,
             text: nameValue,
             category: .name,
+            sourceLabelText: "姓名",
             confidence: min(group.confidence, surname.confidence, givenName.confidence),
             boundingBox: combinedBox.padded(horizontal: 0.003, vertical: 0.004),
             labelBoundingBox: group.labelBoundingBox,
@@ -955,16 +977,173 @@ struct DefaultOCRService: OCRService {
         )
     }
 
+    private static func observedLabel(
+        for labelRule: OCRLabelRule,
+        in labelItem: OCRTextItem
+    ) -> OCRObservedLabel? {
+        guard let labelMatch = labelTextMatch(for: labelRule, in: labelItem.text) else {
+            return nil
+        }
+
+        let bounds = appNormalizedRect(
+            for: labelMatch.range,
+            in: labelItem.recognizedText,
+            text: labelItem.text,
+            fallbackBounds: labelItem.boundingBox
+        ) ?? labelItem.boundingBox
+
+        return OCRObservedLabel(
+            title: labelMatch.title,
+            range: labelMatch.range,
+            boundingBox: bounds
+        )
+    }
+
+    private static func sourceLabelObservation(
+        for category: OCRCandidateCategory,
+        in item: OCRTextItem,
+        before targetRange: NSRange
+    ) -> OCRObservedLabel? {
+        guard let labelRule = sourceLabelRule(for: category),
+              targetRange.location > 0 else {
+            return nil
+        }
+
+        let nsText = item.text as NSString
+        let prefixRange = NSRange(location: 0, length: min(targetRange.location, nsText.length))
+        let prefix = nsText.substring(with: prefixRange)
+        guard let labelMatch = labelTextMatch(for: labelRule, in: prefix) else {
+            return nil
+        }
+
+        let labelBounds = appNormalizedRect(
+            for: labelMatch.range,
+            in: item.recognizedText,
+            text: item.text,
+            fallbackBounds: item.boundingBox
+        ) ?? item.boundingBox
+
+        return OCRObservedLabel(
+            title: labelMatch.title,
+            range: labelMatch.range,
+            boundingBox: labelBounds
+        )
+    }
+
+    private static func sourceLabelRule(for category: OCRCandidateCategory) -> OCRLabelRule? {
+        switch category {
+        case .documentNumber:
+            return labelRules.first { $0.category == .chineseID }
+        default:
+            return labelRules.first { $0.category == category }
+        }
+    }
+
+    private static func labelTextMatch(
+        for labelRule: OCRLabelRule,
+        in text: String
+    ) -> OCRLabelTextMatch? {
+        guard labelRule.matches(text) else {
+            return nil
+        }
+
+        let nsText = text as NSString
+        let fullRange = NSRange(location: 0, length: nsText.length)
+
+        for pattern in labelRule.labelPatterns.sorted(by: { $0.count > $1.count }) {
+            let normalizedPattern = normalizedOCRLabelText(pattern)
+            if isSingleCharacterSplitNameLabelPattern(normalizedPattern),
+               normalizedSplitNameLabelText(text) != normalizedPattern {
+                continue
+            }
+
+            let escapedPattern = NSRegularExpression.escapedPattern(for: pattern)
+            let regex = try! NSRegularExpression(
+                pattern: "\(escapedPattern)\\s*[:：;；]?",
+                options: [.caseInsensitive]
+            )
+
+            if let match = regex.firstMatch(in: text, range: fullRange) {
+                return OCRLabelTextMatch(
+                    title: sanitizedSourceLabelTitle(pattern),
+                    range: match.range
+                )
+            }
+
+            if normalizedOCRLabelText(text).localizedCaseInsensitiveContains(normalizedPattern) {
+                let rangeLength = min((pattern as NSString).length, nsText.length)
+                guard rangeLength > 0 else {
+                    continue
+                }
+
+                return OCRLabelTextMatch(
+                    title: sanitizedSourceLabelTitle(pattern),
+                    range: NSRange(location: 0, length: rangeLength)
+                )
+            }
+        }
+
+        return nil
+    }
+
+    private static func sanitizedSourceLabelTitle(_ text: String) -> String {
+        normalizedOCRValueText(text)
+            .trimmingCharacters(
+                in: CharacterSet.whitespacesAndNewlines
+                    .union(CharacterSet(charactersIn: ":：;；,，.。\"'“”‘’()（）[]【】"))
+            )
+    }
+
+    private static func phoneFallbackBox(
+        toRightOf labelBox: NormalizedRect,
+        labelRule: OCRLabelRule,
+        labelItem: OCRTextItem,
+        textItems: [OCRTextItem],
+        excluding excludedIndexes: Set<Int>
+    ) -> NormalizedRect {
+        var fallbackBox = likelyPhoneFillArea(toRightOf: labelBox)
+
+        if let inlineValueRange = labelRule.inlineValueRange(in: labelItem.text),
+           phoneValueCandidateText((labelItem.text as NSString).substring(with: inlineValueRange)),
+           let inlineValueBox = appNormalizedRect(
+               for: inlineValueRange,
+               in: labelItem.recognizedText,
+               text: labelItem.text,
+               fallbackBounds: labelItem.boundingBox
+           ),
+           phoneValueBox(inlineValueBox, isSameRowRightOf: labelBox) {
+            fallbackBox = unionRect(fallbackBox, inlineValueBox).clamped()
+        }
+
+        for (index, item) in textItems.enumerated() {
+            guard !excludedIndexes.contains(index),
+                  phoneValueCandidateText(item.text),
+                  phoneValueBox(item.boundingBox, isSameRowRightOf: labelBox) else {
+                continue
+            }
+
+            fallbackBox = unionRect(fallbackBox, item.boundingBox).clamped()
+        }
+
+        return fallbackBox
+    }
+
     private static func candidateNearLabel(
         labelRule: OCRLabelRule,
         labelItem: OCRTextItem,
+        labelIndex: Int,
         textItems: [OCRTextItem],
         pageID: PageItem.ID,
         options: OCRDetectionOptions
     ) -> OCRSensitiveCandidate? {
+        guard let observedLabel = observedLabel(for: labelRule, in: labelItem) else {
+            return nil
+        }
+
         if let inlineValue = inlineValueCandidate(
             labelRule: labelRule,
             labelItem: labelItem,
+            observedLabel: observedLabel,
             options: options,
             pageID: pageID
         ) {
@@ -980,31 +1159,58 @@ struct DefaultOCRService: OCRService {
             return nil
         }
 
-        if let valueItem = nearestValueItem(
-            for: labelItem,
-            category: labelRule.category,
-            in: textItems,
-            mode: .sameLineRight
-        ) ?? nearestValueItem(
-            for: labelItem,
-            category: labelRule.category,
-            in: textItems,
-            mode: .below
-        ) {
+        let valueItem = if options.preset == .standard,
+                           labelRule.category == .phone {
+            nearestValueItem(
+                for: observedLabel.boundingBox,
+                category: labelRule.category,
+                in: textItems,
+                excluding: [labelIndex],
+                mode: .sameLineRight
+            )
+        } else {
+            nearestValueItem(
+                for: observedLabel.boundingBox,
+                category: labelRule.category,
+                in: textItems,
+                excluding: [labelIndex],
+                mode: .sameLineRight
+            ) ?? nearestValueItem(
+                for: observedLabel.boundingBox,
+                category: labelRule.category,
+                in: textItems,
+                excluding: [labelIndex],
+                mode: .below
+            )
+        }
+
+        if let valueItem {
             return OCRSensitiveCandidate(
                 pageID: pageID,
                 text: displayText(valueItem.text, for: labelRule.category),
                 category: labelRule.category,
+                sourceLabelText: observedLabel.title,
                 confidence: min(labelItem.confidence, valueItem.confidence),
                 boundingBox: valueItem.boundingBox.padded(horizontal: 0.003, vertical: 0.004),
-                labelBoundingBox: labelItem.boundingBox,
+                labelBoundingBox: observedLabel.boundingBox,
                 detectionKind: .labelValue
             )
         }
 
-        let fallbackBox = labelRule.category == .name && options.preset == .standard
-            ? likelyNameFillArea(toRightOf: labelItem.boundingBox)
-            : likelyFillArea(toRightOf: labelItem.boundingBox)
+        let fallbackBox: NormalizedRect
+        if labelRule.category == .name, options.preset == .standard {
+            fallbackBox = likelyNameFillArea(toRightOf: observedLabel.boundingBox)
+        } else if labelRule.category == .phone, options.preset == .standard {
+            fallbackBox = phoneFallbackBox(
+                toRightOf: observedLabel.boundingBox,
+                labelRule: labelRule,
+                labelItem: labelItem,
+                textItems: textItems,
+                excluding: [labelIndex]
+            )
+        } else {
+            fallbackBox = likelyFillArea(toRightOf: observedLabel.boundingBox)
+        }
         guard allowsLabelFallback(
             for: labelRule.category,
             fallbackBox: fallbackBox,
@@ -1017,9 +1223,10 @@ struct DefaultOCRService: OCRService {
             pageID: pageID,
             text: L10n.Review.ocrNoExplicitValue,
             category: labelRule.category,
+            sourceLabelText: observedLabel.title,
             confidence: labelItem.confidence,
             boundingBox: fallbackBox,
-            labelBoundingBox: labelItem.boundingBox,
+            labelBoundingBox: observedLabel.boundingBox,
             detectionKind: .labelFallback
         )
     }
@@ -1027,6 +1234,7 @@ struct DefaultOCRService: OCRService {
     private static func inlineValueCandidate(
         labelRule: OCRLabelRule,
         labelItem: OCRTextItem,
+        observedLabel: OCRObservedLabel,
         options: OCRDetectionOptions,
         pageID: PageItem.ID
     ) -> OCRSensitiveCandidate? {
@@ -1037,6 +1245,7 @@ struct DefaultOCRService: OCRService {
               let bounds = appNormalizedRect(
                   for: valueRange,
                   in: labelItem.recognizedText,
+                  text: labelItem.text,
                   fallbackBounds: labelItem.boundingBox
               ) else {
             return nil
@@ -1054,9 +1263,10 @@ struct DefaultOCRService: OCRService {
             pageID: pageID,
             text: displayText(text, for: labelRule.category),
             category: labelRule.category,
+            sourceLabelText: observedLabel.title,
             confidence: labelItem.confidence,
             boundingBox: bounds.padded(horizontal: 0.003, vertical: 0.004),
-            labelBoundingBox: labelItem.boundingBox,
+            labelBoundingBox: observedLabel.boundingBox,
             detectionKind: .labelValue
         )
     }
@@ -1194,6 +1404,40 @@ struct DefaultOCRService: OCRService {
         .clamped()
     }
 
+    private static func likelyPhoneFillArea(toRightOf labelBox: NormalizedRect) -> NormalizedRect {
+        let gap = 0.014
+        let x = min(labelBox.maxX + gap, 0.94)
+        let width = min(max(0.24, labelBox.width * 3.2), 0.44, 0.98 - x)
+        let height = min(max(labelBox.height * 1.05, 0.018), 0.034)
+        let y = max(labelBox.centerY - height / 2, 0)
+
+        return NormalizedRect(
+            x: x,
+            y: y,
+            width: width,
+            height: height
+        )
+        .clamped()
+    }
+
+    private static func phoneValueCandidateText(_ text: String) -> Bool {
+        let digitCount = text.filter(\.isNumber).count
+        return digitCount > 0 && digitCount <= 18
+    }
+
+    private static func phoneValueBox(
+        _ valueBox: NormalizedRect,
+        isSameRowRightOf labelBox: NormalizedRect
+    ) -> Bool {
+        let verticalCenterDelta = abs(valueBox.centerY - labelBox.centerY)
+        let rightGap = valueBox.x - labelBox.maxX
+
+        return rightGap >= -0.015
+            && rightGap <= 0.52
+            && verticalCenterDelta <= max(labelBox.height, valueBox.height) * 0.90
+            && valueBox.maxX <= min(labelBox.maxX + 0.68, 1)
+    }
+
     private static func likelyNameFillArea(toRightOf labelBox: NormalizedRect) -> NormalizedRect {
         let gap = 0.015
         let x = min(labelBox.maxX + gap, 0.94)
@@ -1264,6 +1508,119 @@ struct DefaultOCRService: OCRService {
             group: group,
             pageID: pageID
         )
+    }
+
+    private static func splitNameFallbackROIValueCandidate(
+        _ group: OCRSplitNameLabelGroup,
+        pageID: PageItem.ID,
+        context: OCRProcessingContext
+    ) -> OCRSensitiveCandidate? {
+        guard let sourceImage = context.sourceImage else {
+            return nil
+        }
+
+        let fillArea = likelySplitNameFillArea(for: group)
+        guard let croppedImage = croppedImage(sourceImage, to: fillArea) else {
+            return nil
+        }
+
+        if let candidate = splitNameFallbackROIValueCandidate(
+            in: croppedImage,
+            fillArea: fillArea,
+            group: group,
+            pageID: pageID
+        ) {
+            return candidate
+        }
+
+        guard let scaledImage = scaledImage(croppedImage, scale: 3) else {
+            return nil
+        }
+
+        return splitNameFallbackROIValueCandidate(
+            in: scaledImage,
+            fillArea: fillArea,
+            group: group,
+            pageID: pageID
+        )
+    }
+
+    private static func splitNameFallbackROIValueCandidate(
+        in fillImage: CGImage,
+        fillArea: NormalizedRect,
+        group: OCRSplitNameLabelGroup,
+        pageID: PageItem.ID
+    ) -> OCRSensitiveCandidate? {
+        guard let observations = try? recognizedTextObservations(in: fillImage) else {
+            return nil
+        }
+
+        let components = recognizedTextItems(from: observations)
+            .map { item in
+                OCRTextItem(
+                    text: item.text,
+                    recognizedText: nil,
+                    boundingBox: pageRect(from: item.boundingBox, in: fillArea),
+                    confidence: item.confidence
+                )
+            }
+            .compactMap { item -> OCRSplitNameComponentValue? in
+                guard let component = likelyHumanNameComponent(from: item.text) else {
+                    return nil
+                }
+
+                return OCRSplitNameComponentValue(
+                    part: .givenName,
+                    text: component,
+                    boundingBox: item.boundingBox,
+                    confidence: item.confidence,
+                    sourceIndex: nil
+                )
+            }
+            .sorted(by: splitNameFallbackROIComponentPrecedes)
+
+        guard !components.isEmpty else {
+            return nil
+        }
+
+        let combinedValue = components.map(\.text).joined()
+        guard let nameValue = likelyHumanNameDisplayValue(from: combinedValue) else {
+            return nil
+        }
+
+        let combinedBox = components
+            .map(\.boundingBox)
+            .dropFirst()
+            .reduce(components[0].boundingBox, unionRect)
+
+        return OCRSensitiveCandidate(
+            pageID: pageID,
+            text: nameValue,
+            category: .name,
+            sourceLabelText: "姓名",
+            confidence: min(group.confidence, components.map(\.confidence).min() ?? group.confidence),
+            boundingBox: combinedBox.padded(horizontal: 0.003, vertical: 0.004),
+            labelBoundingBox: group.labelBoundingBox,
+            detectionKind: .labelValue
+        )
+    }
+
+    nonisolated private static func splitNameFallbackROIComponentPrecedes(
+        _ left: OCRSplitNameComponentValue,
+        _ right: OCRSplitNameComponentValue
+    ) -> Bool {
+        let sameRowThreshold = max(left.boundingBox.height, right.boundingBox.height) * 0.80
+        let isSameRow = abs(left.boundingBox.centerY - right.boundingBox.centerY) <= max(sameRowThreshold, 0.018)
+
+        if isSameRow, left.boundingBox.x != right.boundingBox.x {
+            return left.boundingBox.x < right.boundingBox.x
+        }
+
+        if left.boundingBox.y != right.boundingBox.y {
+            return left.boundingBox.y < right.boundingBox.y
+        }
+
+        return left.boundingBox.x < right.boundingBox.x
     }
 
     private static func splitNameRowOCRComponentValue(
@@ -1397,20 +1754,52 @@ struct DefaultOCRService: OCRService {
     private static func appNormalizedRect(
         for targetRange: NSRange,
         in recognizedText: VNRecognizedText?,
+        text: String,
         fallbackBounds: NormalizedRect
     ) -> NormalizedRect? {
-        guard let recognizedText,
-              let stringRange = Range(targetRange, in: recognizedText.string),
-              let preciseBounds = try? recognizedText.boundingBox(for: stringRange)?.boundingBox else {
+        if let recognizedText,
+           let stringRange = Range(targetRange, in: recognizedText.string),
+           let preciseBounds = try? recognizedText.boundingBox(for: stringRange)?.boundingBox {
+            let bounds = appNormalizedRect(fromVisionBounds: preciseBounds)
+            if bounds.width > 0, bounds.height > 0 {
+                return bounds
+            }
+        }
+
+        let estimatedBounds = estimatedAppNormalizedRect(
+            for: targetRange,
+            in: text,
+            fallbackBounds: fallbackBounds
+        )
+
+        return estimatedBounds.width > 0 && estimatedBounds.height > 0
+            ? estimatedBounds
+            : fallbackBounds
+    }
+
+    private static func estimatedAppNormalizedRect(
+        for targetRange: NSRange,
+        in text: String,
+        fallbackBounds: NormalizedRect
+    ) -> NormalizedRect {
+        let textLength = (text as NSString).length
+        guard textLength > 0,
+              targetRange.location >= 0,
+              targetRange.length > 0,
+              targetRange.location + targetRange.length <= textLength else {
             return fallbackBounds
         }
 
-        let bounds = appNormalizedRect(fromVisionBounds: preciseBounds)
-        guard bounds.width > 0, bounds.height > 0 else {
-            return fallbackBounds
-        }
+        let startRatio = Double(targetRange.location) / Double(textLength)
+        let widthRatio = Double(targetRange.length) / Double(textLength)
 
-        return bounds
+        return NormalizedRect(
+            x: fallbackBounds.x + fallbackBounds.width * startRatio,
+            y: fallbackBounds.y,
+            width: fallbackBounds.width * widthRatio,
+            height: fallbackBounds.height
+        )
+        .clamped()
     }
 
     private static func appNormalizedRect(fromVisionBounds visionBounds: CGRect) -> NormalizedRect {
@@ -1431,11 +1820,14 @@ struct DefaultOCRService: OCRService {
             return
         }
 
-        guard !candidates.contains(where: { existingCandidate in
+        if let duplicateIndex = candidates.firstIndex(where: { existingCandidate in
             candidateCategoriesOverlap(existingCandidate.category, candidate.category)
                 && normalizedText(existingCandidate.text) == normalizedText(candidate.text)
                 && existingCandidate.boundingBox.substantiallyOverlaps(candidate.boundingBox)
-        }) else {
+        }) {
+            if isPreferredCandidate(candidate, over: candidates[duplicateIndex]) {
+                candidates[duplicateIndex] = candidate
+            }
             return
         }
 
@@ -1644,6 +2036,7 @@ struct DefaultOCRService: OCRService {
             mergedCandidate.category = fallback.category
             mergedCandidate.text = displayText(mergedCandidate.text, for: fallback.category)
             mergedCandidate.labelBoundingBox = fallback.labelBoundingBox
+            mergedCandidate.sourceLabelText = fallback.sourceLabelText ?? mergedCandidate.sourceLabelText
             mergedCandidate.detectionKind = .labelValue
             mergedCandidate.confidence = max(mergedCandidate.confidence ?? 0, fallback.confidence ?? 0)
 
@@ -2152,6 +2545,10 @@ struct DefaultOCRService: OCRService {
 
         if candidateHasExplicitValue != existingHasExplicitValue {
             return candidateHasExplicitValue
+        }
+
+        if (candidate.sourceLabelText?.isEmpty == false) != (existingCandidate.sourceLabelText?.isEmpty == false) {
+            return candidate.sourceLabelText?.isEmpty == false
         }
 
         if candidate.category != existingCandidate.category {
@@ -2717,6 +3114,38 @@ struct DefaultOCRService: OCRService {
         let pageID = UUID()
         let surnameLabelBox = NormalizedRect(x: 0.10, y: 0.10, width: 0.040, height: 0.018)
         let givenNameLabelBox = NormalizedRect(x: 0.10, y: 0.140, width: 0.040, height: 0.018)
+        let case1 = privateOCRRegressionStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("电话：13800000000", box: NormalizedRect(x: 0.10, y: 0.20, width: 0.32, height: 0.020))
+            ]
+        )
+        let case2 = privateOCRRegressionStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("手机号：13800000000", box: NormalizedRect(x: 0.10, y: 0.20, width: 0.34, height: 0.020))
+            ]
+        )
+        let case3 = privateOCRRegressionStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("联系电话：13800000000", box: NormalizedRect(x: 0.10, y: 0.20, width: 0.38, height: 0.020))
+            ]
+        )
+        let case4 = privateOCRRegressionStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("电话：", box: NormalizedRect(x: 0.10, y: 0.20, width: 0.08, height: 0.020))
+            ]
+        )
+        let case5EmailBox = NormalizedRect(x: 0.10, y: 0.255, width: 0.12, height: 0.020)
+        let case5 = privateOCRRegressionStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("电话：13800000000", box: NormalizedRect(x: 0.10, y: 0.20, width: 0.32, height: 0.020)),
+                privateOCRRegressionTextItem("电子邮件：", box: case5EmailBox)
+            ]
+        )
         let caseB = privateOCRRegressionStandardCandidates(
             pageID: pageID,
             textItems: [
@@ -2760,30 +3189,56 @@ struct DefaultOCRService: OCRService {
 
         return [
             PrivateOCRRegressionCheckResult(
-                name: "Case B split name normal order",
+                name: "Case 1 telephone label preservation",
+                passed: privateOCRRegressionHasSinglePhone(case1, title: "电话", text: "13800000000")
+                    && privateOCRRegressionPhoneBoxIsRightOfLabel(case1)
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Case 2 mobile label preservation",
+                passed: privateOCRRegressionHasSinglePhone(case2, title: "手机号", text: "13800000000")
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Case 3 contact phone label preservation",
+                passed: privateOCRRegressionHasSinglePhone(case3, title: "联系电话", text: "13800000000")
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Case 4 phone label-only same-row region",
+                passed: privateOCRRegressionHasSinglePhone(case4, title: "电话", text: L10n.Review.ocrNoExplicitValue)
+                    && privateOCRRegressionPhoneBoxIsRightOfLabel(case4)
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Case 5 phone box does not cover email",
+                passed: privateOCRRegressionHasSinglePhone(case5, title: "电话", text: "13800000000")
+                    && !case5.contains { candidate in
+                        candidate.category == .phone
+                            && privateOCRRegressionRect(candidate.boundingBox, reachesRow: case5EmailBox)
+                    }
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Case 6 split name normal order",
                 passed: privateOCRRegressionHasSingleName(caseB, equalTo: "张三")
                     && !privateOCRRegressionHasName(caseB, equalTo: "三张")
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Case C split name compound surname",
+                name: "Case 6 split name compound surname",
                 passed: privateOCRRegressionHasSingleName(caseC, equalTo: "欧阳小明")
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Case D tester only excluded",
+                name: "Case 6 tester only excluded",
                 passed: caseD.filter { $0.category == .name }.isEmpty
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Case E combined name layout",
+                name: "Case 7 combined name layout",
                 passed: privateOCRRegressionHasSingleName(caseE, equalTo: "张三")
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Case F false positive long text",
+                name: "Case 8 false positive long text",
                 passed: caseF.filter { $0.category == .name }.isEmpty
                     && !(labelRules.first { $0.category == .name }?.matches("使用协议名称：“Threshold 500Hz TB”-打印于：2023-7-21") ?? true)
                     && !(labelRules.first { $0.category == .name }?.matches("名称") ?? true)
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Case G invalid name value",
+                name: "Case 9 invalid name value",
                 passed: caseG.filter { $0.category == .name }.isEmpty
                     && !isLikelyValue("30岁", for: .name)
                     && !isLikelyValue("30", for: .name)
@@ -2820,12 +3275,18 @@ struct DefaultOCRService: OCRService {
         textItems: [OCRTextItem]
     ) -> PrivateOCRRegressionFixtureResult {
         let nameCandidates = candidates.filter { $0.category == .name }
+        let phoneCandidates = candidates.filter { $0.category == .phone }
         let nonPatientRows = privateOCRRegressionRows(
             matching: standardNonPatientNameLabelTexts,
             in: textItems
         )
         let forbiddenNameRows = privateOCRRegressionRows(
             matching: forbiddenNameLabelTexts,
+            in: textItems
+        )
+        let phoneRows = privateOCRRegressionPhoneRows(in: textItems)
+        let emailRows = privateOCRRegressionRows(
+            matching: ["电子邮件", "邮箱", "Email", "E-mail"],
             in: textItems
         )
         let splitNameGroups = splitNameLabelGroups(in: textItems)
@@ -2875,6 +3336,19 @@ struct DefaultOCRService: OCRService {
 
             return likelyHumanNameDisplayValue(from: candidate.text) != nil
         } ?? false
+        let phoneTitlePreserved = phoneRows.first.map { phoneRow in
+            phoneCandidates.contains { $0.displayTitle == phoneRow.title }
+        } ?? true
+        let phoneBoxTargetsSameRow = phoneRows.first.map { phoneRow in
+            phoneCandidates.contains { candidate in
+                privateOCRRegressionRect(candidate.boundingBox, covers: phoneRow.expectedValueBox)
+            }
+        } ?? true
+        let phoneBoxAvoidsEmailRows = phoneCandidates.allSatisfy { candidate in
+            !emailRows.contains { emailRow in
+                privateOCRRegressionRect(candidate.boundingBox, reachesRow: emailRow.rowBox)
+            }
+        }
 
         let checks = [
             PrivateOCRRegressionCheckResult(name: "Case A exactly one patient name candidate", passed: exactlyOneNameCandidate),
@@ -2886,7 +3360,10 @@ struct DefaultOCRService: OCRService {
             PrivateOCRRegressionCheckResult(name: "Case A ID candidate exists if ID source is present", passed: idCandidateExistsIfPresent),
             PrivateOCRRegressionCheckResult(name: "Case A name box covers split-name fill area", passed: nameBoxCoversFillArea),
             PrivateOCRRegressionCheckResult(name: "Case A name box excludes tester/operator rows", passed: nameBoxExcludesTesterRows),
-            PrivateOCRRegressionCheckResult(name: "Case A name result is value extraction or region fallback", passed: nameCandidateIsValueOrFallback)
+            PrivateOCRRegressionCheckResult(name: "Case A name result is value extraction or region fallback", passed: nameCandidateIsValueOrFallback),
+            PrivateOCRRegressionCheckResult(name: "Case A phone title preserves source label", passed: phoneTitlePreserved),
+            PrivateOCRRegressionCheckResult(name: "Case A phone box targets same-row value area", passed: phoneBoxTargetsSameRow),
+            PrivateOCRRegressionCheckResult(name: "Case A phone box avoids email row", passed: phoneBoxAvoidsEmailRows)
         ]
         let classification: PrivateOCRRegressionClassification
         if checks.allSatisfy(\.passed),
@@ -2938,6 +3415,47 @@ struct DefaultOCRService: OCRService {
                 labelBox: item.boundingBox,
                 rowBox: rowBox,
                 normalizedValue: valueText.map(normalizedOCRLabelText)
+            )
+        }
+    }
+
+    private static func privateOCRRegressionPhoneRows(
+        in textItems: [OCRTextItem]
+    ) -> [PrivateOCRRegressionPhoneRowFact] {
+        guard let phoneLabelRule = labelRules.first(where: { $0.category == .phone }) else {
+            return []
+        }
+
+        return textItems.enumerated().compactMap { index, item in
+            guard let observedLabel = observedLabel(for: phoneLabelRule, in: item) else {
+                return nil
+            }
+
+            var expectedValueBox = likelyPhoneFillArea(toRightOf: observedLabel.boundingBox)
+            if let inlineValueRange = phoneLabelRule.inlineValueRange(in: item.text),
+               phoneValueCandidateText((item.text as NSString).substring(with: inlineValueRange)),
+               let inlineValueBox = appNormalizedRect(
+                   for: inlineValueRange,
+                   in: item.recognizedText,
+                   text: item.text,
+                   fallbackBounds: item.boundingBox
+               ),
+               phoneValueBox(inlineValueBox, isSameRowRightOf: observedLabel.boundingBox) {
+                expectedValueBox = unionRect(expectedValueBox, inlineValueBox)
+            } else if let valueItem = nearestValueItem(
+                for: observedLabel.boundingBox,
+                category: .phone,
+                in: textItems,
+                excluding: [index],
+                mode: .sameLineRight
+            ) {
+                expectedValueBox = unionRect(expectedValueBox, valueItem.boundingBox)
+            }
+
+            return PrivateOCRRegressionPhoneRowFact(
+                title: observedLabel.title,
+                labelBox: observedLabel.boundingBox,
+                expectedValueBox: expectedValueBox.clamped()
             )
         }
     }
@@ -3087,6 +3605,7 @@ struct DefaultOCRService: OCRService {
     ) -> PrivateOCRRegressionCandidateSummary {
         PrivateOCRRegressionCandidateSummary(
             category: candidate.category.rawValue,
+            displayTitle: candidate.displayTitle,
             detectionKind: candidate.detectionKind.rawValue,
             boundingBox: String(
                 privateOCRRegressionRectDescription(candidate.boundingBox)
@@ -3145,6 +3664,33 @@ struct DefaultOCRService: OCRService {
             && privateOCRRegressionHasName(candidates, equalTo: expectedText)
     }
 
+    private static func privateOCRRegressionHasSinglePhone(
+        _ candidates: [OCRSensitiveCandidate],
+        title expectedTitle: String,
+        text expectedText: String
+    ) -> Bool {
+        let phoneCandidates = candidates.filter { $0.category == .phone }
+        guard phoneCandidates.count == 1,
+              let phoneCandidate = phoneCandidates.first else {
+            return false
+        }
+
+        return phoneCandidate.displayTitle == expectedTitle
+            && phoneCandidate.text == expectedText
+    }
+
+    private static func privateOCRRegressionPhoneBoxIsRightOfLabel(
+        _ candidates: [OCRSensitiveCandidate]
+    ) -> Bool {
+        guard let phoneCandidate = candidates.first(where: { $0.category == .phone }),
+              let labelBox = phoneCandidate.labelBoundingBox else {
+            return false
+        }
+
+        return phoneCandidate.boundingBox.x >= labelBox.maxX - 0.015
+            && abs(phoneCandidate.boundingBox.centerY - labelBox.centerY) <= max(phoneCandidate.boundingBox.height, labelBox.height) * 0.95
+    }
+
     private static func privateOCRRegressionHasName(
         _ candidates: [OCRSensitiveCandidate],
         equalTo expectedText: String
@@ -3156,6 +3702,12 @@ struct DefaultOCRService: OCRService {
         let labelBox: NormalizedRect
         let rowBox: NormalizedRect
         let normalizedValue: String?
+    }
+
+    private struct PrivateOCRRegressionPhoneRowFact {
+        let title: String
+        let labelBox: NormalizedRect
+        let expectedValueBox: NormalizedRect
     }
     #endif
 
@@ -3198,6 +3750,17 @@ private struct OCRTextItem {
     let recognizedText: VNRecognizedText?
     let boundingBox: NormalizedRect
     let confidence: Double
+}
+
+private struct OCRObservedLabel {
+    let title: String
+    let range: NSRange
+    let boundingBox: NormalizedRect
+}
+
+private struct OCRLabelTextMatch {
+    let title: String
+    let range: NSRange
 }
 
 private enum OCRSplitNameLabelPart {

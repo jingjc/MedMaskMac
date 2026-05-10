@@ -459,7 +459,7 @@ private struct OCRCandidateRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(candidate.category.displayTitle)
+            Text(candidate.displayTitle)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
@@ -495,11 +495,12 @@ private struct OCRCandidateRow: View {
         .opacity(candidate.status == .ignored ? 0.58 : 1)
         .background(rowBackgroundColor)
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(
-                    isSelected ? Color.accentColor.opacity(0.75) : Color.clear,
-                    lineWidth: 1.5
-                )
+            HStack(spacing: 0) {
+                Rectangle()
+                    .fill(isSelected ? Color.secondary.opacity(0.45) : Color.clear)
+                    .frame(width: 3)
+                Spacer(minLength: 0)
+            }
         )
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
@@ -517,11 +518,15 @@ private struct OCRCandidateRow: View {
     }
 
     private var rowBackgroundColor: Color {
+        if isSelected {
+            return Color(nsColor: .separatorColor).opacity(0.18)
+        }
+
         switch candidate.status {
         case .pending, .masked:
-            Color(nsColor: .controlBackgroundColor)
+            return Color(nsColor: .controlBackgroundColor)
         case .ignored:
-            Color(nsColor: .controlBackgroundColor).opacity(0.55)
+            return Color(nsColor: .controlBackgroundColor).opacity(0.55)
         }
     }
 }
