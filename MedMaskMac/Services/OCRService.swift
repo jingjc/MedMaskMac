@@ -39,6 +39,46 @@ enum OCRServiceError: LocalizedError {
     }
 }
 
+#if PRIVATE_OCR_REGRESSION
+enum PrivateOCRRegressionClassification: String {
+    case valueExtractionPassed
+    case regionFallbackPassed
+    case failed
+}
+
+struct PrivateOCRRegressionCandidateSummary {
+    let category: String
+    let detectionKind: String
+    let boundingBox: String
+    let redactedValue: String
+}
+
+struct PrivateOCRRegressionCheckResult {
+    let name: String
+    let passed: Bool
+}
+
+struct PrivateOCRRegressionFixtureResult {
+    let classification: PrivateOCRRegressionClassification
+    let totalCandidateCount: Int
+    let candidateSummaries: [PrivateOCRRegressionCandidateSummary]
+    let splitNameGroupCount: Int
+    let pairedSplitNameGroupCount: Int
+    let expectedNameFillArea: String?
+    let nameFillCoverageRatio: Double
+    let exactlyOneNameCandidate: Bool
+    let testerOperatorContaminationDetected: Bool
+    let standardScopeClean: Bool
+    let idSourcePresentInOCR: Bool
+    let idCandidateExistsIfPresent: Bool
+    let checks: [PrivateOCRRegressionCheckResult]
+
+    var passed: Bool {
+        classification != .failed && checks.allSatisfy(\.passed)
+    }
+}
+#endif
+
 struct DefaultOCRService: OCRService {
     let availabilitySummary = L10n.Services.ocrSummary
 
@@ -89,8 +129,8 @@ struct DefaultOCRService: OCRService {
         sourceURL: URL
     ) throws -> OCRRecognitionInput {
         try withSecurityScopedAccess(to: sourceURL) {
-            guard let image = NSImage(contentsOf: sourceURL),
-                  let cgImage = image.cgImageValue else {
+            guard let cgImage = Self.makeOCRImageCGImage(from: sourceURL)
+                ?? NSImage(contentsOf: sourceURL)?.cgImageValue else {
                 throw OCRServiceError.imageUnavailable(fileName)
             }
 
@@ -241,6 +281,51 @@ struct DefaultOCRService: OCRService {
         let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
         try handler.perform([request])
         return request.results ?? []
+    }
+
+    private static func makeOCRImageCGImage(from sourceURL: URL) -> CGImage? {
+        guard let imageSource = CGImageSourceCreateWithURL(sourceURL as CFURL, nil) else {
+            return nil
+        }
+
+        let options = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: 2400
+        ] as CFDictionary
+
+        let image = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options)
+            ?? CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
+
+        guard let image else {
+            return nil
+        }
+
+        return normalizedRGBImage(image)
+    }
+
+    private static func normalizedRGBImage(_ image: CGImage) -> CGImage? {
+        guard image.width > 0, image.height > 0 else {
+            return nil
+        }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: image.width,
+            height: image.height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return image
+        }
+
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return context.makeImage() ?? image
     }
 
     private static func recognizedTextItems(from observations: [VNRecognizedTextObservation]) -> [OCRTextItem] {
@@ -443,11 +528,50 @@ struct DefaultOCRService: OCRService {
             return (part, nil)
         }
 
+        if let part = emptyFillSplitNameLabelPart(for: item.text) {
+            return (part, nil)
+        }
+
         guard let inlineMatch = splitNameInlineValue(in: item) else {
             return nil
         }
 
         return (inlineMatch.part, inlineMatch.value)
+    }
+
+    private static func emptyFillSplitNameLabelPart(for text: String) -> OCRSplitNameLabelPart? {
+        let normalizedText = normalizedOCRValueText(text)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let labelIndex = normalizedText.firstIndex(where: { !$0.isWhitespace }) else {
+            return nil
+        }
+
+        let part: OCRSplitNameLabelPart
+        switch normalizedText[labelIndex] {
+        case "姓":
+            part = .surname
+        case "名":
+            part = .givenName
+        default:
+            return nil
+        }
+
+        let remainderStart = normalizedText.index(after: labelIndex)
+        let remainder = String(normalizedText[remainderStart...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !remainder.isEmpty else {
+            return part
+        }
+
+        return remainder.allSatisfy(isSplitNameEmptyFillCharacter) ? part : nil
+    }
+
+    nonisolated private static func isSplitNameEmptyFillCharacter(_ character: Character) -> Bool {
+        if isSplitNameInlineSeparator(character) {
+            return true
+        }
+
+        return ["_", "-", "—", "–", "－", ".", "．", "·", "•", "|", "/", "\\", "﹕", "∶"].contains(character)
     }
 
     private static func splitNameInlineValue(
@@ -515,8 +639,8 @@ struct DefaultOCRService: OCRService {
         )
     }
 
-    private static func isSplitNameInlineSeparator(_ character: Character) -> Bool {
-        [":", "：", ";", "；", "﹔"].contains(character)
+    nonisolated private static func isSplitNameInlineSeparator(_ character: Character) -> Bool {
+        [":", "：", "﹕", "∶", ";", "；", "﹔"].contains(character)
     }
 
     nonisolated private static func splitNameLabelPrecedes(
@@ -847,6 +971,15 @@ struct DefaultOCRService: OCRService {
             return inlineValue
         }
 
+        if labelRule.category == .name,
+           options.preset == .standard,
+           labelRule.inlineValueRange(
+               in: labelItem.text,
+               allowsNameWithSpaces: true
+           ) != nil {
+            return nil
+        }
+
         if let valueItem = nearestValueItem(
             for: labelItem,
             category: labelRule.category,
@@ -1082,11 +1215,14 @@ struct DefaultOCRService: OCRService {
         let labelBox = group.labelBoundingBox
         let rightEdge = labelBoxes.map(\.maxX).max() ?? labelBox.maxX
         let rowHeight = labelBoxes.map(\.height).max() ?? labelBox.height
+        let hasGivenNameRow = group.givenNameBoundingBox != nil
         let gap = 0.015
         let x = min(rightEdge + gap, 0.94)
         let width = min(max(0.24, labelBox.width * 2.8), 0.58, 0.98 - x)
         let y = max(labelBox.y - max(rowHeight * 0.35, 0.006), 0)
-        let height = min(max(labelBox.height + rowHeight * 0.70, 0.036), 0.16, 1 - y)
+        let height = hasGivenNameRow
+            ? min(max(labelBox.height + rowHeight * 0.70, 0.036), 0.16, 1 - y)
+            : min(max(rowHeight * 4.6, 0.085), 0.12, 1 - y)
 
         return NormalizedRect(
             x: x,
@@ -2543,6 +2679,485 @@ struct DefaultOCRService: OCRService {
             normalized == normalizedOCRLabelText(pattern)
         }
     }
+
+    #if PRIVATE_OCR_REGRESSION
+    static func privateOCRRegressionFixtureResult(
+        fixtureURL: URL
+    ) async throws -> PrivateOCRRegressionFixtureResult {
+        let page = PageItem(
+            pageNumber: 1,
+            sourcePageIndex: 0,
+            status: .readyForReview
+        )
+        let file = FileItem(
+            displayName: fixtureURL.lastPathComponent,
+            sourceURL: fixtureURL,
+            kind: .image,
+            status: .readyForReview,
+            pages: [page]
+        )
+        let options = OCRDetectionOptions(preset: .standard, customFields: [])
+        let service = DefaultOCRService()
+        let candidates = try await service.candidates(for: file, page: page, options: options)
+        let input = try service.makeImageRecognitionInput(
+            fileName: fixtureURL.lastPathComponent,
+            sourceURL: fixtureURL
+        )
+        let textItems = try Self.recognizedTextItems(
+            from: Self.recognizedTextObservations(in: input.cgImage)
+        )
+
+        return privateOCRRegressionFixtureResult(
+            candidates: candidates,
+            textItems: textItems
+        )
+    }
+
+    static func privateOCRRegressionSyntheticCaseResults() -> [PrivateOCRRegressionCheckResult] {
+        let pageID = UUID()
+        let surnameLabelBox = NormalizedRect(x: 0.10, y: 0.10, width: 0.040, height: 0.018)
+        let givenNameLabelBox = NormalizedRect(x: 0.10, y: 0.140, width: 0.040, height: 0.018)
+        let caseB = privateOCRRegressionStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("姓:", box: surnameLabelBox),
+                privateOCRRegressionTextItem("张", box: NormalizedRect(x: 0.18, y: 0.10, width: 0.026, height: 0.018)),
+                privateOCRRegressionTextItem("名:", box: givenNameLabelBox),
+                privateOCRRegressionTextItem("三", box: NormalizedRect(x: 0.18, y: 0.14, width: 0.026, height: 0.018))
+            ]
+        )
+        let caseC = privateOCRRegressionStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("姓: 欧阳", box: NormalizedRect(x: 0.10, y: 0.10, width: 0.140, height: 0.018)),
+                privateOCRRegressionTextItem("名: 小明", box: NormalizedRect(x: 0.10, y: 0.14, width: 0.140, height: 0.018))
+            ]
+        )
+        let caseD = privateOCRRegressionStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试者: 李四", box: NormalizedRect(x: 0.10, y: 0.10, width: 0.180, height: 0.018))
+            ]
+        )
+        let caseE = privateOCRRegressionStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("姓名：张三", box: NormalizedRect(x: 0.10, y: 0.10, width: 0.160, height: 0.018))
+            ]
+        )
+        let caseF = privateOCRRegressionStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("使用协议名称：“Threshold 500Hz TB”-打印于：2023-7-21", box: NormalizedRect(x: 0.10, y: 0.10, width: 0.620, height: 0.018))
+            ]
+        )
+        let caseG = privateOCRRegressionStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("姓名：30岁", box: NormalizedRect(x: 0.10, y: 0.10, width: 0.130, height: 0.018))
+            ]
+        )
+
+        return [
+            PrivateOCRRegressionCheckResult(
+                name: "Case B split name normal order",
+                passed: privateOCRRegressionHasSingleName(caseB, equalTo: "张三")
+                    && !privateOCRRegressionHasName(caseB, equalTo: "三张")
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Case C split name compound surname",
+                passed: privateOCRRegressionHasSingleName(caseC, equalTo: "欧阳小明")
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Case D tester only excluded",
+                passed: caseD.filter { $0.category == .name }.isEmpty
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Case E combined name layout",
+                passed: privateOCRRegressionHasSingleName(caseE, equalTo: "张三")
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Case F false positive long text",
+                passed: caseF.filter { $0.category == .name }.isEmpty
+                    && !(labelRules.first { $0.category == .name }?.matches("使用协议名称：“Threshold 500Hz TB”-打印于：2023-7-21") ?? true)
+                    && !(labelRules.first { $0.category == .name }?.matches("名称") ?? true)
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Case G invalid name value",
+                passed: caseG.filter { $0.category == .name }.isEmpty
+                    && !isLikelyValue("30岁", for: .name)
+                    && !isLikelyValue("30", for: .name)
+                    && !isLikelyValue("Age 30", for: .name)
+                    && !isLikelyValue("三十岁", for: .name)
+                    && !isLikelyValue("男", for: .name)
+                    && !isLikelyValue("女", for: .name)
+                    && !isLikelyValue("M", for: .name)
+                    && !isLikelyValue("F", for: .name)
+                    && !isLikelyValue("420117199303207538", for: .name)
+                    && !isLikelyValue("test@example.com", for: .name)
+                    && !isLikelyValue("13800138000", for: .name)
+                    && !isLikelyValue("1993-03-20", for: .name)
+                    && !isLikelyValue("中国", for: .name)
+                    && !isLikelyValue("地址", for: .name)
+                    && !isLikelyValue("性别", for: .name)
+                    && !isLikelyValue("年龄", for: .name)
+                    && !isLikelyValue("生日", for: .name)
+                    && !isLikelyValue("证件号", for: .name)
+                    && !isLikelyValue("测试者", for: .name)
+                    && !isLikelyValue("检查者", for: .name)
+                    && !isLikelyValue("操作者", for: .name)
+                    && !isLikelyValue("医生", for: .name)
+                    && !isLikelyValue("技师", for: .name)
+                    && !isLikelyValue("使用协议名称", for: .name)
+                    && !isLikelyValue("Threshold", for: .name)
+                    && !isLikelyValue("ABR", for: .name)
+            )
+        ]
+    }
+
+    private static func privateOCRRegressionFixtureResult(
+        candidates: [OCRSensitiveCandidate],
+        textItems: [OCRTextItem]
+    ) -> PrivateOCRRegressionFixtureResult {
+        let nameCandidates = candidates.filter { $0.category == .name }
+        let nonPatientRows = privateOCRRegressionRows(
+            matching: standardNonPatientNameLabelTexts,
+            in: textItems
+        )
+        let forbiddenNameRows = privateOCRRegressionRows(
+            matching: forbiddenNameLabelTexts,
+            in: textItems
+        )
+        let splitNameGroups = splitNameLabelGroups(in: textItems)
+        let pairedSplitNameGroups = splitNameGroups
+            .filter { $0.givenNameBoundingBox != nil }
+        let splitGroup = (pairedSplitNameGroups.isEmpty ? splitNameGroups : pairedSplitNameGroups)
+            .sorted { $0.labelBoundingBox.y < $1.labelBoundingBox.y }
+            .first
+        let nameCandidate = nameCandidates.first
+        let exactlyOneNameCandidate = nameCandidates.count == 1
+        let duplicateNameCandidatesAbsent = nameCandidates.count <= 1
+        let testerOperatorContaminationDetected = nameCandidates.contains { candidate in
+            privateOCRRegressionCandidate(candidate, isContaminatedBy: nonPatientRows)
+        }
+        let nameFromForbiddenLabelDetected = nameCandidates.contains { candidate in
+            privateOCRRegressionCandidate(candidate, isSourcedFrom: forbiddenNameRows)
+                || isForbiddenNameValueText(candidate.text)
+        }
+        let standardScopeClean = candidates.allSatisfy { candidate in
+            OCRDetectionOptions.standardCategories.contains(candidate.category)
+        }
+        let idSourcePresentInOCR = privateOCRRegressionIDSourcePresent(in: textItems)
+        let idCandidateExists = candidates.contains {
+            $0.category == .chineseID || $0.category == .documentNumber
+        }
+        let idCandidateExistsIfPresent = !idSourcePresentInOCR || idCandidateExists
+        let expectedFillArea = splitGroup.map(likelySplitNameFillArea)
+        let nameBoxCoversFillArea = nameCandidate.map { candidate in
+            privateOCRRegressionNameCandidateCoversSplitFillArea(candidate, splitGroup: splitGroup)
+        } ?? false
+        let nameFillCoverageRatio = if let nameCandidate,
+                                       let expectedFillArea {
+            privateOCRRegressionCoverageRatio(nameCandidate.boundingBox, expectedFillArea)
+        } else {
+            0.0
+        }
+        let nameBoxExcludesTesterRows = nameCandidate.map { candidate in
+            !nonPatientRows.contains { row in
+                privateOCRRegressionRect(candidate.boundingBox, reachesRow: row.rowBox)
+                    || candidate.labelBoundingBox.map { privateOCRRegressionRect($0, reachesRow: row.labelBox) } == true
+            }
+        } ?? false
+        let nameCandidateIsValueOrFallback = nameCandidate.map { candidate in
+            if candidate.detectionKind == .labelFallback {
+                return candidate.text == L10n.Review.ocrNoExplicitValue
+            }
+
+            return likelyHumanNameDisplayValue(from: candidate.text) != nil
+        } ?? false
+
+        let checks = [
+            PrivateOCRRegressionCheckResult(name: "Case A exactly one patient name candidate", passed: exactlyOneNameCandidate),
+            PrivateOCRRegressionCheckResult(name: "Case A no duplicate name candidates", passed: duplicateNameCandidatesAbsent),
+            PrivateOCRRegressionCheckResult(name: "Case A no tester/operator contamination", passed: !testerOperatorContaminationDetected),
+            PrivateOCRRegressionCheckResult(name: "Case A name not created from tester/operator row", passed: !(nameCandidate.map { privateOCRRegressionCandidate($0, isSourcedFrom: nonPatientRows) } ?? true)),
+            PrivateOCRRegressionCheckResult(name: "Case A name not created from protocol/name label", passed: !nameFromForbiddenLabelDetected),
+            PrivateOCRRegressionCheckResult(name: "Case A Standard scope clean", passed: standardScopeClean),
+            PrivateOCRRegressionCheckResult(name: "Case A ID candidate exists if ID source is present", passed: idCandidateExistsIfPresent),
+            PrivateOCRRegressionCheckResult(name: "Case A name box covers split-name fill area", passed: nameBoxCoversFillArea),
+            PrivateOCRRegressionCheckResult(name: "Case A name box excludes tester/operator rows", passed: nameBoxExcludesTesterRows),
+            PrivateOCRRegressionCheckResult(name: "Case A name result is value extraction or region fallback", passed: nameCandidateIsValueOrFallback)
+        ]
+        let classification: PrivateOCRRegressionClassification
+        if checks.allSatisfy(\.passed),
+           let nameCandidate {
+            classification = nameCandidate.detectionKind == .labelFallback
+                ? .regionFallbackPassed
+                : .valueExtractionPassed
+        } else {
+            classification = .failed
+        }
+
+        return PrivateOCRRegressionFixtureResult(
+            classification: classification,
+            totalCandidateCount: candidates.count,
+            candidateSummaries: candidates.map(privateOCRRegressionCandidateSummary),
+            splitNameGroupCount: splitNameGroups.count,
+            pairedSplitNameGroupCount: pairedSplitNameGroups.count,
+            expectedNameFillArea: expectedFillArea.map(privateOCRRegressionRectDescription),
+            nameFillCoverageRatio: nameFillCoverageRatio,
+            exactlyOneNameCandidate: exactlyOneNameCandidate,
+            testerOperatorContaminationDetected: testerOperatorContaminationDetected,
+            standardScopeClean: standardScopeClean,
+            idSourcePresentInOCR: idSourcePresentInOCR,
+            idCandidateExistsIfPresent: idCandidateExistsIfPresent,
+            checks: checks
+        )
+    }
+
+    private static func privateOCRRegressionRows(
+        matching labelTexts: [String],
+        in textItems: [OCRTextItem]
+    ) -> [PrivateOCRRegressionRowFact] {
+        textItems.enumerated().compactMap { _, item in
+            guard privateOCRRegressionText(item.text, matchesAnyLabelIn: labelTexts) else {
+                return nil
+            }
+
+            let inlineValue = privateOCRRegressionInlineValue(afterAny: labelTexts, in: item.text)
+            let valueItem = nearestValueItem(
+                for: item,
+                category: .name,
+                in: textItems,
+                mode: .sameLineRight
+            )
+            let valueText = inlineValue ?? valueItem?.text
+            let rowBox = valueItem.map { unionRect(item.boundingBox, $0.boundingBox) } ?? item.boundingBox
+
+            return PrivateOCRRegressionRowFact(
+                labelBox: item.boundingBox,
+                rowBox: rowBox,
+                normalizedValue: valueText.map(normalizedOCRLabelText)
+            )
+        }
+    }
+
+    private static func privateOCRRegressionText(
+        _ text: String,
+        matchesAnyLabelIn labelTexts: [String]
+    ) -> Bool {
+        let compact = normalizedOCRLabelText(text)
+        guard !compact.isEmpty else {
+            return false
+        }
+
+        return labelTexts.contains { labelText in
+            let label = normalizedOCRLabelText(labelText)
+            return compact == label || compact.hasPrefix(label)
+        }
+    }
+
+    private static func privateOCRRegressionInlineValue(
+        afterAny labelTexts: [String],
+        in text: String
+    ) -> String? {
+        let normalized = normalizedOCRValueText(text)
+        let sortedLabels = labelTexts.sorted { $0.count > $1.count }
+
+        for labelText in sortedLabels {
+            guard let labelRange = normalized.range(of: labelText, options: [.caseInsensitive]) else {
+                continue
+            }
+
+            let rawValue = String(normalized[labelRange.upperBound...])
+                .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ":：;；,，.。\"'“”‘’()（）[]【】")))
+            if let value = likelyHumanNameDisplayValueFromRawValue(rawValue) {
+                return value
+            }
+        }
+
+        return nil
+    }
+
+    private static func privateOCRRegressionCandidate(
+        _ candidate: OCRSensitiveCandidate,
+        isContaminatedBy rows: [PrivateOCRRegressionRowFact]
+    ) -> Bool {
+        rows.contains { row in
+            if let normalizedValue = row.normalizedValue,
+               !normalizedValue.isEmpty {
+                let candidateValue = normalizedOCRLabelText(candidate.text)
+                if candidateValue == normalizedValue || candidateValue.contains(normalizedValue) {
+                    return true
+                }
+            }
+
+            return privateOCRRegressionCandidate(candidate, isSourcedFrom: [row])
+                || privateOCRRegressionRect(candidate.boundingBox, reachesRow: row.rowBox)
+        }
+    }
+
+    private static func privateOCRRegressionCandidate(
+        _ candidate: OCRSensitiveCandidate,
+        isSourcedFrom rows: [PrivateOCRRegressionRowFact]
+    ) -> Bool {
+        rows.contains { row in
+            if let labelBoundingBox = candidate.labelBoundingBox,
+               privateOCRRegressionRect(labelBoundingBox, reachesRow: row.labelBox) {
+                return true
+            }
+
+            return privateOCRRegressionRect(candidate.boundingBox, reachesRow: row.rowBox)
+                && abs(candidate.boundingBox.centerY - row.rowBox.centerY) <= max(candidate.boundingBox.height, row.rowBox.height)
+        }
+    }
+
+    private static func privateOCRRegressionNameCandidateCoversSplitFillArea(
+        _ candidate: OCRSensitiveCandidate,
+        splitGroup: OCRSplitNameLabelGroup?
+    ) -> Bool {
+        guard let splitGroup else {
+            return false
+        }
+
+        let expectedFillArea = likelySplitNameFillArea(for: splitGroup)
+        if privateOCRRegressionRect(candidate.boundingBox, covers: expectedFillArea) {
+            return true
+        }
+
+        if candidate.detectionKind != .labelFallback,
+           candidate.boundingBox.centerX >= expectedFillArea.x,
+           candidate.boundingBox.centerX <= expectedFillArea.maxX,
+           candidate.boundingBox.y >= expectedFillArea.y - 0.020,
+           candidate.boundingBox.maxY <= expectedFillArea.maxY + 0.020 {
+            return true
+        }
+
+        return false
+    }
+
+    private static func privateOCRRegressionRect(
+        _ candidateBox: NormalizedRect,
+        covers expectedBox: NormalizedRect
+    ) -> Bool {
+        privateOCRRegressionCoverageRatio(candidateBox, expectedBox) >= 0.35
+            || candidateBoxesReferToSameLocation(candidateBox, expectedBox)
+    }
+
+    private static func privateOCRRegressionCoverageRatio(
+        _ candidateBox: NormalizedRect,
+        _ expectedBox: NormalizedRect
+    ) -> Double {
+        let intersection = normalizedRectIntersectionArea(candidateBox, expectedBox)
+        let candidateArea = candidateBox.width * candidateBox.height
+        let expectedArea = expectedBox.width * expectedBox.height
+
+        guard candidateArea > 0, expectedArea > 0 else {
+            return 0
+        }
+
+        return intersection / min(candidateArea, expectedArea)
+    }
+
+    private static func privateOCRRegressionRect(
+        _ candidateBox: NormalizedRect,
+        reachesRow rowBox: NormalizedRect
+    ) -> Bool {
+        let verticalOverlap = max(0, min(candidateBox.maxY, rowBox.maxY) - max(candidateBox.y, rowBox.y))
+        guard verticalOverlap > min(candidateBox.height, rowBox.height) * 0.20 else {
+            return false
+        }
+
+        let horizontalOverlap = max(0, min(candidateBox.maxX, rowBox.maxX) - max(candidateBox.x, rowBox.x))
+        return horizontalOverlap > 0
+            || abs(candidateBox.centerX - rowBox.centerX) <= max(candidateBox.width, rowBox.width) * 0.75 + 0.08
+    }
+
+    private static func privateOCRRegressionIDSourcePresent(in textItems: [OCRTextItem]) -> Bool {
+        textItems.contains { item in
+            isChineseIDLikeText(item.text)
+                || targetRules
+                    .filter { $0.category == .chineseID || $0.category == .documentNumber }
+                    .contains { !$0.matches(in: item.text).isEmpty }
+        }
+    }
+
+    private static func privateOCRRegressionCandidateSummary(
+        _ candidate: OCRSensitiveCandidate
+    ) -> PrivateOCRRegressionCandidateSummary {
+        PrivateOCRRegressionCandidateSummary(
+            category: candidate.category.rawValue,
+            detectionKind: candidate.detectionKind.rawValue,
+            boundingBox: String(
+                privateOCRRegressionRectDescription(candidate.boundingBox)
+            ),
+            redactedValue: privateOCRRegressionRedactedValue(for: candidate)
+        )
+    }
+
+    private static func privateOCRRegressionRectDescription(_ rect: NormalizedRect) -> String {
+        String(
+            format: "(x: %.4f, y: %.4f, w: %.4f, h: %.4f)",
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height
+        )
+    }
+
+    private static func privateOCRRegressionRedactedValue(
+        for candidate: OCRSensitiveCandidate
+    ) -> String {
+        switch candidate.category {
+        case .name:
+            return candidate.detectionKind == .labelFallback ? "<REGION_FALLBACK>" : "<REDACTED_NAME>"
+        case .chineseID, .documentNumber:
+            return "<REDACTED_ID>"
+        default:
+            return "<REDACTED_VALUE>"
+        }
+    }
+
+    private static func privateOCRRegressionTextItem(
+        _ text: String,
+        box: NormalizedRect
+    ) -> OCRTextItem {
+        OCRTextItem(text: text, recognizedText: nil, boundingBox: box, confidence: 0.90)
+    }
+
+    private static func privateOCRRegressionStandardCandidates(
+        pageID: PageItem.ID,
+        textItems: [OCRTextItem]
+    ) -> [OCRSensitiveCandidate] {
+        buildCandidates(
+            from: textItems,
+            pageID: pageID,
+            options: OCRDetectionOptions(preset: .standard, customFields: []),
+            context: .empty
+        )
+    }
+
+    private static func privateOCRRegressionHasSingleName(
+        _ candidates: [OCRSensitiveCandidate],
+        equalTo expectedText: String
+    ) -> Bool {
+        candidates.filter { $0.category == .name }.count == 1
+            && privateOCRRegressionHasName(candidates, equalTo: expectedText)
+    }
+
+    private static func privateOCRRegressionHasName(
+        _ candidates: [OCRSensitiveCandidate],
+        equalTo expectedText: String
+    ) -> Bool {
+        candidates.contains { $0.category == .name && $0.text == expectedText }
+    }
+
+    private struct PrivateOCRRegressionRowFact {
+        let labelBox: NormalizedRect
+        let rowBox: NormalizedRect
+        let normalizedValue: String?
+    }
+    #endif
 
     private func rasterSize(for pageSize: CGSize) -> CGSize {
         let scale = 200.0 / 72.0
