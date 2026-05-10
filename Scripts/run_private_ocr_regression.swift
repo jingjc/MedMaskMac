@@ -66,6 +66,8 @@ struct PrivateOCRRegressionMain {
 
             print("fixture=PrivateFixtures/OCR/split_name_real_private.jpeg")
             print("classification=\(result.classification.rawValue)")
+            print("patientName=\(result.patientNameClassification.rawValue)")
+            print("phone=\(result.phoneClassification.rawValue)")
             print("totalCandidateCount=\(result.totalCandidateCount)")
             print("candidateCategories=\(categories.isEmpty ? "none" : categories)")
             print("splitNameGroupCount=\(result.splitNameGroupCount)")
@@ -82,6 +84,9 @@ struct PrivateOCRRegressionMain {
             }
             print("exactlyOneNameCandidate=\(result.exactlyOneNameCandidate)")
             print("testerOperatorContaminationDetected=\(result.testerOperatorContaminationDetected)")
+            print("duplicateNameCandidatesDetected=\(result.duplicateNameCandidatesDetected)")
+            print("phoneTitlePreserved=\(result.phoneTitlePreserved)")
+            print("phoneBoxSameRow=\(result.phoneBoxSameRow)")
             print("standardScopeClean=\(result.standardScopeClean)")
             print("idSourcePresentInOCR=\(result.idSourcePresentInOCR)")
             print("idCandidateExistsIfPresent=\(result.idCandidateExistsIfPresent)")
