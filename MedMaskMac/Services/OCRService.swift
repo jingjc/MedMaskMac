@@ -253,12 +253,6 @@ struct DefaultOCRService: OCRService {
                         )
                         : nil
 
-                    debugLogDateBinding(
-                        valueText: match.text,
-                        valueBox: bounds,
-                        binding: dateBinding
-                    )
-
                     appendCandidate(
                         OCRSensitiveCandidate(
                             pageID: pageID,
@@ -1529,7 +1523,11 @@ struct DefaultOCRService: OCRService {
                 pageID: pageID,
                 text: displayText(valueItem.text, for: labelRule.category),
                 category: labelRule.category,
-                sourceLabelText: observedLabel.title,
+                sourceLabelText: sourceLabelText(
+                    observedLabel.title,
+                    for: labelRule.category,
+                    options: options
+                ),
                 confidence: min(labelItem.confidence, valueItem.confidence),
                 boundingBox: valueItem.boundingBox.padded(horizontal: 0.003, vertical: 0.004),
                 labelBoundingBox: observedLabel.boundingBox,
@@ -1588,7 +1586,11 @@ struct DefaultOCRService: OCRService {
             pageID: pageID,
             text: L10n.Review.ocrNoExplicitValue,
             category: labelRule.category,
-            sourceLabelText: observedLabel.title,
+            sourceLabelText: sourceLabelText(
+                observedLabel.title,
+                for: labelRule.category,
+                options: options
+            ),
             confidence: labelItem.confidence,
             boundingBox: fallbackBox,
             labelBoundingBox: observedLabel.boundingBox,
@@ -1628,12 +1630,29 @@ struct DefaultOCRService: OCRService {
             pageID: pageID,
             text: displayText(text, for: labelRule.category),
             category: labelRule.category,
-            sourceLabelText: observedLabel.title,
+            sourceLabelText: sourceLabelText(
+                observedLabel.title,
+                for: labelRule.category,
+                options: options
+            ),
             confidence: labelItem.confidence,
             boundingBox: bounds.padded(horizontal: 0.003, vertical: 0.004),
             labelBoundingBox: observedLabel.boundingBox,
             detectionKind: .labelValue
         )
+    }
+
+    private static func sourceLabelText(
+        _ title: String,
+        for category: OCRCandidateCategory,
+        options: OCRDetectionOptions
+    ) -> String? {
+        if options.preset == .strict,
+           category == .birthday || category == .examDate {
+            return nil
+        }
+
+        return title
     }
 
     private static func nearestValueItem(
@@ -2539,12 +2558,6 @@ struct DefaultOCRService: OCRService {
             mergedCandidate.detectionKind = .labelValue
             mergedCandidate.confidence = max(mergedCandidate.confidence ?? 0, fallback.confidence ?? 0)
 
-            debugLogFallbackMerge(
-                fallback: fallback,
-                value: mergedCandidates[valueIndex],
-                merged: mergedCandidate
-            )
-
             mergedCandidates[valueIndex] = mergedCandidate
             removedCandidateIDs.insert(fallback.id)
         }
@@ -2589,57 +2602,6 @@ struct DefaultOCRService: OCRService {
         let centerDeltaX = abs(value.boundingBox.centerX - fallback.boundingBox.centerX)
         let centerDeltaY = abs(value.boundingBox.centerY - fallback.boundingBox.centerY)
         return centerDeltaX + centerDeltaY * 2
-    }
-
-    private static func debugLogDateBinding(
-        valueText: String,
-        valueBox: NormalizedRect,
-        binding: OCRDateBinding?
-    ) {
-        #if DEBUG
-        guard let binding else {
-            return
-        }
-
-        print(
-            "[OCRDateBinding] value='\(valueText)' valueBox=\(debugDescription(valueBox)) "
-                + "label='\(binding.labelText)' labelBox=\(debugDescription(binding.labelBoundingBox)) "
-                + "category=\(binding.category.rawValue) reason='\(binding.reason)'"
-        )
-        #endif
-    }
-
-    private static func debugLogFallbackMerge(
-        fallback: OCRSensitiveCandidate,
-        value: OCRSensitiveCandidate,
-        merged: OCRSensitiveCandidate
-    ) {
-        #if DEBUG
-        guard isDateCategory(fallback.category) || isDateCategory(value.category) else {
-            return
-        }
-
-        print(
-            "[OCRFallbackMerge] fallback=\(fallback.category.rawValue)/'\(fallback.text)' "
-                + "fallbackBox=\(debugDescription(fallback.boundingBox)) "
-                + "value=\(value.category.rawValue)/'\(value.text)' valueBox=\(debugDescription(value.boundingBox)) "
-                + "merged=\(merged.category.rawValue)/'\(merged.text)'"
-        )
-        #endif
-    }
-
-    private static func debugDescription(_ rect: NormalizedRect) -> String {
-        #if DEBUG
-        return String(
-            format: "(x: %.4f, y: %.4f, w: %.4f, h: %.4f)",
-            rect.x,
-            rect.y,
-            rect.width,
-            rect.height
-        )
-        #else
-        return ""
-        #endif
     }
 
     #if DEBUG
@@ -3725,6 +3687,75 @@ struct DefaultOCRService: OCRService {
                 privateOCRRegressionTextItem("姓名：30岁", box: NormalizedRect(x: 0.10, y: 0.10, width: 0.130, height: 0.018))
             ]
         )
+        let strictCase1 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("生日：1993-03-20", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.260, height: 0.020))
+            ]
+        )
+        let strictCase2 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("出生日期：1993/3/20", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.290, height: 0.020))
+            ]
+        )
+        let strictCase3 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("DOB: 1993-03-20", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.260, height: 0.020))
+            ]
+        )
+        let strictCase4 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试日期：2023-07-21", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.300, height: 0.020))
+            ]
+        )
+        let strictCase5 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("报告日期：2023/7/21", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.290, height: 0.020))
+            ]
+        )
+        let strictCase6 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("2023-07-21", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.140, height: 0.020))
+            ]
+        )
+        let strictCase7 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("生日：1993-03-20", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.260, height: 0.020))
+            ]
+        )
+        let strictCase8 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试日期：2023-7-21", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.290, height: 0.020)),
+                privateOCRRegressionTextItem("2023-07-21", box: NormalizedRect(x: 0.245, y: 0.30, width: 0.135, height: 0.020))
+            ]
+        )
+        let strictCase9 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("电子邮件：", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.120, height: 0.020))
+            ]
+        )
+        let strictCase10 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("电子邮件：", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.120, height: 0.020)),
+                privateOCRRegressionTextItem("电子邮件：", box: NormalizedRect(x: 0.102, y: 0.301, width: 0.120, height: 0.020))
+            ]
+        )
+        let strictCase11 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("电子邮件：", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.120, height: 0.020)),
+                privateOCRRegressionTextItem("user@example.com", box: NormalizedRect(x: 0.240, y: 0.30, width: 0.220, height: 0.020))
+            ]
+        )
 
         return [
             PrivateOCRRegressionCheckResult(
@@ -3811,6 +3842,106 @@ struct DefaultOCRService: OCRService {
                     && !isLikelyValue("使用协议名称", for: .name)
                     && !isLikelyValue("Threshold", for: .name)
                     && !isLikelyValue("ABR", for: .name)
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 1 birthday label",
+                passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
+                    strictCase1,
+                    category: .birthday,
+                    text: "1993-03-20"
+                )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 2 birth date alias",
+                passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
+                    strictCase2,
+                    category: .birthday,
+                    text: "1993-03-20"
+                )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 3 DOB alias",
+                passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
+                    strictCase3,
+                    category: .birthday,
+                    text: "1993-03-20"
+                )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 4 exam test date",
+                passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
+                    strictCase4,
+                    category: .examDate,
+                    text: "2023-07-21"
+                )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 5 report date alias",
+                passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
+                    strictCase5,
+                    category: .examDate,
+                    text: "2023-07-21"
+                )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 6 generic unbound date",
+                passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
+                    strictCase6,
+                    category: .date,
+                    text: "2023-07-21"
+                )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 7 duplicate birthday date",
+                passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
+                    strictCase7,
+                    category: .birthday,
+                    text: "1993-03-20"
+                )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 8 duplicate test date variants",
+                passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
+                    strictCase8,
+                    category: .examDate,
+                    text: "2023-07-21"
+                )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 9 email fallback",
+                passed: privateOCRRegressionHasOnlyCandidate(
+                    strictCase9,
+                    category: .email,
+                    title: "电子邮件",
+                    text: L10n.Review.ocrNoExplicitValue
+                )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 10 duplicate email fallback",
+                passed: privateOCRRegressionHasOnlyCandidate(
+                    strictCase10,
+                    category: .email,
+                    title: "电子邮件",
+                    text: L10n.Review.ocrNoExplicitValue
+                )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 11 email value beats fallback",
+                passed: privateOCRRegressionHasOnlyCandidate(
+                    strictCase11,
+                    category: .email,
+                    title: "电子邮件",
+                    text: "user@example.com"
+                )
+                    && strictCase11.first.map { $0.detectionKind != .labelFallback } == true
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 13 Standard phone label preservation",
+                passed: privateOCRRegressionHasSinglePhone(case1, title: "电话", text: "13800000000")
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 14 Standard name false positive blocked",
+                passed: caseF.filter { $0.category == .name }.isEmpty
             )
         ]
     }
@@ -4236,6 +4367,49 @@ struct DefaultOCRService: OCRService {
             options: OCRDetectionOptions(preset: .standard, customFields: []),
             context: .empty
         )
+    }
+
+    private static func privateOCRRegressionStrictCandidates(
+        pageID: PageItem.ID,
+        textItems: [OCRTextItem]
+    ) -> [OCRSensitiveCandidate] {
+        buildCandidates(
+            from: textItems,
+            pageID: pageID,
+            options: OCRDetectionOptions(preset: .strict, customFields: []),
+            context: .empty
+        )
+    }
+
+    private static func privateOCRRegressionHasOnlyCandidate(
+        _ candidates: [OCRSensitiveCandidate],
+        category: OCRCandidateCategory,
+        title expectedTitle: String,
+        text expectedText: String
+    ) -> Bool {
+        guard candidates.count == 1,
+              let candidate = candidates.first else {
+            return false
+        }
+
+        return candidate.category == category
+            && candidate.displayTitle == expectedTitle
+            && candidate.text == expectedText
+    }
+
+    private static func privateOCRRegressionHasOnlyCanonicalDateCandidate(
+        _ candidates: [OCRSensitiveCandidate],
+        category: OCRCandidateCategory,
+        text expectedText: String
+    ) -> Bool {
+        guard candidates.count == 1,
+              let candidate = candidates.first else {
+            return false
+        }
+
+        return candidate.category == category
+            && candidate.text == expectedText
+            && candidate.sourceLabelText == nil
     }
 
     private static func privateOCRRegressionHasSingleName(

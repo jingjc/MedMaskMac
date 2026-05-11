@@ -186,7 +186,7 @@ enum L10n {
         static let ocrCandidateStatusMasked = L10n.string("review.ocr.status.masked", default: "Masked")
         static let ocrCandidateStatusIgnored = L10n.string("review.ocr.status.ignored", default: "Ignored")
         static let ocrNoCandidates = L10n.string("review.ocr.no_candidates", default: "No sensitive items detected")
-        static let ocrNoExplicitValue = L10n.string("review.ocr.no_explicit_value", default: "Located. Please check mask coverage.")
+        static let ocrNoExplicitValue = L10n.string("review.ocr.no_explicit_value", default: "No specific content recognized. Please check this fill-in area.")
         static let ocrStateIdle = L10n.string("review.ocr.state.idle", default: "Idle")
         static let ocrStateRunning = L10n.string("review.ocr.state.running", default: "Detecting current page...")
         static let ocrStateNeedsRerun = L10n.string("review.ocr.state.needs_rerun", default: "OCR options changed. Run OCR again.")

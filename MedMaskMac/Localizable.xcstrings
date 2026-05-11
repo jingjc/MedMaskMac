@@ -2478,13 +2478,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Located. Please check mask coverage."
+            "value" : "No specific content recognized. Please check this fill-in area."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已定位，请检查遮盖范围"
+            "value" : "未识别到具体内容，建议检查该填写区域"
           }
         }
       }
