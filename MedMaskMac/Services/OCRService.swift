@@ -369,6 +369,12 @@ struct DefaultOCRService: OCRService {
         to candidates: inout [OCRSensitiveCandidate]
     ) {
         let includedCategories = options.includedCategories
+        let consumedHeaderIndexes = appendStrictMedicalHeaderCandidates(
+            from: textItems,
+            pageID: pageID,
+            options: options,
+            to: &candidates
+        )
         let consumedSplitNameLabelIndexes = appendPatientSplitNameLabelCandidates(
             from: textItems,
             pageID: pageID,
@@ -378,7 +384,8 @@ struct DefaultOCRService: OCRService {
         )
 
         for (labelIndex, labelItem) in textItems.enumerated() {
-            let wasConsumed = consumedSplitNameLabelIndexes.contains(labelIndex)
+            let wasConsumed = consumedHeaderIndexes.contains(labelIndex)
+                || consumedSplitNameLabelIndexes.contains(labelIndex)
 
             guard !wasConsumed else {
                 continue
@@ -417,6 +424,55 @@ struct DefaultOCRService: OCRService {
                 appendCandidate(candidate, to: &candidates)
             }
         }
+    }
+
+    private static func appendStrictMedicalHeaderCandidates(
+        from textItems: [OCRTextItem],
+        pageID: PageItem.ID,
+        options: OCRDetectionOptions,
+        to candidates: inout [OCRSensitiveCandidate]
+    ) -> Set<Int> {
+        guard options.preset == .strict else {
+            return []
+        }
+
+        let includedCategories = options.includedCategories
+        var consumedIndexes = Set<Int>()
+
+        for (index, item) in textItems.enumerated() {
+            guard let fields = medicalReportHeaderFields(in: item.text) else {
+                continue
+            }
+
+            var appendedField = false
+            for field in fields where includedCategories.contains(field.category) {
+                let bounds = appNormalizedRect(
+                    for: field.range,
+                    in: item.recognizedText,
+                    text: item.text,
+                    fallbackBounds: item.boundingBox
+                ) ?? item.boundingBox
+
+                appendCandidate(
+                    OCRSensitiveCandidate(
+                        pageID: pageID,
+                        text: field.text,
+                        category: field.category,
+                        confidence: item.confidence,
+                        boundingBox: bounds.padded(horizontal: 0.003, vertical: 0.004),
+                        detectionKind: .directValue
+                    ),
+                    to: &candidates
+                )
+                appendedField = true
+            }
+
+            if appendedField {
+                consumedIndexes.insert(index)
+            }
+        }
+
+        return consumedIndexes
     }
 
     private static func appendPatientSplitNameLabelCandidates(
@@ -467,6 +523,217 @@ struct DefaultOCRService: OCRService {
         }
 
         return splitNameLabelGroups(from: splitItems)
+    }
+
+    private static func medicalReportHeaderFields(in text: String) -> [OCRHeaderField]? {
+        guard let hospitalRange = hospitalHeaderRange(in: text) else {
+            return nil
+        }
+
+        let nsText = text as NSString
+        let hospitalText = nsText.substring(with: hospitalRange)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isHospitalHeaderValue(hospitalText) else {
+            return nil
+        }
+
+        var fields = [
+            OCRHeaderField(
+                category: .hospital,
+                text: hospitalText,
+                range: hospitalRange
+            )
+        ]
+
+        let tailRange = NSRange(
+            location: rangeUpperBound(hospitalRange),
+            length: max(0, nsText.length - rangeUpperBound(hospitalRange))
+        )
+        if let departmentField = departmentHeaderField(in: text, tailRange: tailRange) {
+            fields.append(departmentField)
+        }
+
+        return fields
+    }
+
+    private static func hospitalHeaderRange(in text: String) -> NSRange? {
+        let nsText = text as NSString
+        let fullRange = NSRange(location: 0, length: nsText.length)
+        guard let start = firstNonWhitespaceLocation(in: text),
+              start < nsText.length else {
+            return nil
+        }
+
+        var bestEnd: Int?
+        for suffix in hospitalHeaderSuffixes {
+            var searchRange = fullRange
+            while searchRange.length > 0 {
+                let match = nsText.range(of: suffix, options: [], range: searchRange)
+                guard match.location != NSNotFound else {
+                    break
+                }
+
+                bestEnd = max(bestEnd ?? 0, rangeUpperBound(match))
+                let nextLocation = match.location + 1
+                searchRange = NSRange(
+                    location: nextLocation,
+                    length: max(0, nsText.length - nextLocation)
+                )
+            }
+        }
+
+        guard let end = bestEnd,
+              end > start else {
+            return nil
+        }
+
+        let range = NSRange(location: start, length: end - start)
+        let value = nsText.substring(with: range)
+        guard !value.contains(":"),
+              !value.contains("：") else {
+            return nil
+        }
+
+        return range
+    }
+
+    private static func departmentHeaderField(
+        in text: String,
+        tailRange: NSRange
+    ) -> OCRHeaderField? {
+        guard let contentRange = trimmedHeaderComponentRange(in: text, range: tailRange) else {
+            return nil
+        }
+
+        let reportStart = reportTitleStart(in: text, range: contentRange)
+        let departmentRange = NSRange(
+            location: contentRange.location,
+            length: max(0, (reportStart ?? rangeUpperBound(contentRange)) - contentRange.location)
+        )
+        guard let trimmedDepartmentRange = trimmedHeaderComponentRange(in: text, range: departmentRange) else {
+            return nil
+        }
+
+        let departmentText = (text as NSString).substring(with: trimmedDepartmentRange)
+        guard isDepartmentHeaderValue(departmentText) else {
+            return nil
+        }
+
+        return OCRHeaderField(
+            category: .department,
+            text: departmentText,
+            range: trimmedDepartmentRange
+        )
+    }
+
+    private static func reportTitleStart(in text: String, range: NSRange) -> Int? {
+        let nsText = text as NSString
+        var bestStart: Int?
+
+        for pattern in reportTitlePatterns {
+            var searchRange = range
+            while searchRange.length > 0 {
+                let match = nsText.range(of: pattern, options: [.caseInsensitive], range: searchRange)
+                guard match.location != NSNotFound else {
+                    break
+                }
+
+                var start = match.location
+                if pattern == "报告单" {
+                    start = asciiTokenStart(before: start, in: text, lowerBound: range.location)
+                }
+
+                bestStart = min(bestStart ?? start, start)
+                let nextLocation = match.location + 1
+                searchRange = NSRange(
+                    location: nextLocation,
+                    length: max(0, rangeUpperBound(range) - nextLocation)
+                )
+            }
+        }
+
+        return bestStart
+    }
+
+    private static func asciiTokenStart(
+        before location: Int,
+        in text: String,
+        lowerBound: Int
+    ) -> Int {
+        let nsText = text as NSString
+        var current = location
+        while current > lowerBound {
+            let previousRange = NSRange(location: current - 1, length: 1)
+            let previous = nsText.substring(with: previousRange)
+            guard previous.range(of: #"^[A-Za-z0-9]$"#, options: .regularExpression) != nil else {
+                break
+            }
+
+            current -= 1
+        }
+
+        return current
+    }
+
+    private static func trimmedHeaderComponentRange(
+        in text: String,
+        range: NSRange
+    ) -> NSRange? {
+        let nsText = text as NSString
+        var location = max(0, range.location)
+        var upperBound = min(nsText.length, rangeUpperBound(range))
+
+        while location < upperBound,
+              headerTrimCharacters.contains(character(at: location, in: text)) {
+            location += 1
+        }
+
+        while upperBound > location,
+              headerTrimCharacters.contains(character(at: upperBound - 1, in: text)) {
+            upperBound -= 1
+        }
+
+        guard upperBound > location else {
+            return nil
+        }
+
+        return NSRange(location: location, length: upperBound - location)
+    }
+
+    private static func firstNonWhitespaceLocation(in text: String) -> Int? {
+        let nsText = text as NSString
+        for index in 0..<nsText.length where !CharacterSet.whitespacesAndNewlines.contains(character(at: index, in: text)) {
+            return index
+        }
+
+        return nil
+    }
+
+    private static func character(at location: Int, in text: String) -> UnicodeScalar {
+        let nsText = text as NSString
+        return nsText.substring(with: NSRange(location: location, length: 1)).unicodeScalars.first
+            ?? UnicodeScalar(32)!
+    }
+
+    private static func isHospitalHeaderValue(_ text: String) -> Bool {
+        let normalized = normalizedOCRValueText(text)
+        guard normalized.count >= 4,
+              !reportTitlePatterns.contains(where: { normalized.localizedCaseInsensitiveContains($0) }) else {
+            return false
+        }
+
+        return hospitalHeaderSuffixes.contains { normalized.hasSuffix($0) }
+    }
+
+    private static func isDepartmentHeaderValue(_ text: String) -> Bool {
+        let normalized = normalizedOCRValueText(text)
+        guard normalized.count >= 2,
+              normalized.count <= 30,
+              !reportTitlePatterns.contains(where: { normalized.localizedCaseInsensitiveContains($0) }) else {
+            return false
+        }
+
+        return departmentHeaderSuffixes.contains { normalized.hasSuffix($0) }
     }
 
     private static func splitNameLabelGroups(from splitItems: [OCRSplitNameLabelItem]) -> [OCRSplitNameLabelGroup] {
@@ -1496,6 +1763,35 @@ struct DefaultOCRService: OCRService {
             .first
     }
 
+    private static func chineseIDMatch(in text: String) -> OCRChineseIDMatch? {
+        if let targetMatch = targetRules
+            .filter({ $0.category == .chineseID })
+            .flatMap({ $0.matches(in: text) })
+            .first {
+            return OCRChineseIDMatch(
+                value: targetMatch.text,
+                range: targetMatch.targetRange
+            )
+        }
+
+        let normalizedText = normalizedOCRValueText(text)
+        let nsText = normalizedText as NSString
+        let fullRange = NSRange(location: 0, length: nsText.length)
+        let regex = try! NSRegularExpression(
+            pattern: #"(?<![0-9A-Za-z])\d{17}[0-9Xx](?![0-9A-Za-z])"#,
+            options: []
+        )
+
+        guard let match = regex.firstMatch(in: normalizedText, range: fullRange) else {
+            return nil
+        }
+
+        return OCRChineseIDMatch(
+            value: nsText.substring(with: match.range),
+            range: match.range
+        )
+    }
+
     private static func phoneValueIsAcceptable(
         _ digits: String,
         minimumDigits: Int = 5
@@ -1588,6 +1884,18 @@ struct DefaultOCRService: OCRService {
             )
         }
 
+        if options.preset == .strict,
+           labelRule.category == .birthday,
+           let idBirthdayCandidate = birthdayFromNearbyIDValueCandidate(
+               observedLabel: observedLabel,
+               labelConfidence: labelItem.confidence,
+               textItems: textItems,
+               excluding: [labelIndex],
+               pageID: pageID
+           ) {
+            return idBirthdayCandidate
+        }
+
         if usesStandardPhoneExtraction(for: labelRule.category, options: options),
            let sameRowCandidate = phoneSameRowValueCandidate(
                labelRule: labelRule,
@@ -1648,6 +1956,76 @@ struct DefaultOCRService: OCRService {
             labelBoundingBox: observedLabel.boundingBox,
             detectionKind: .labelFallback
         )
+    }
+
+    private static func birthdayFromNearbyIDValueCandidate(
+        observedLabel: OCRObservedLabel,
+        labelConfidence: Double,
+        textItems: [OCRTextItem],
+        excluding excludedIndexes: Set<Int>,
+        pageID: PageItem.ID
+    ) -> OCRSensitiveCandidate? {
+        textItems
+            .enumerated()
+            .compactMap { index, item -> OCRSensitiveCandidate? in
+                guard !excludedIndexes.contains(index),
+                      let match = chineseIDMatch(in: item.text),
+                      let idBounds = appNormalizedRect(
+                          for: match.range,
+                          in: item.recognizedText,
+                          text: item.text,
+                          fallbackBounds: item.boundingBox
+                      ),
+                      birthdayIDValueIsNear(labelBox: observedLabel.boundingBox, valueBox: idBounds) else {
+                    return nil
+                }
+
+                let idText = match.value
+                let birthStart = idText.index(idText.startIndex, offsetBy: 6)
+                let birthEnd = idText.index(birthStart, offsetBy: 8)
+                let birthDigits = String(idText[birthStart..<birthEnd])
+                guard let birthdayText = normalizedDateValue(birthDigits) else {
+                    return nil
+                }
+
+                let birthRange = NSRange(location: match.range.location + 6, length: 8)
+                let birthBounds = appNormalizedRect(
+                    for: birthRange,
+                    in: item.recognizedText,
+                    text: item.text,
+                    fallbackBounds: item.boundingBox
+                ) ?? idBounds
+
+                return OCRSensitiveCandidate(
+                    pageID: pageID,
+                    text: birthdayText,
+                    category: .birthday,
+                    confidence: min(labelConfidence, item.confidence),
+                    boundingBox: birthBounds.padded(horizontal: 0.003, vertical: 0.004),
+                    labelBoundingBox: observedLabel.boundingBox,
+                    detectionKind: .labelValue
+                )
+            }
+            .sorted { left, right in
+                fallbackMergeScore(value: left, fallback: OCRSensitiveCandidate(
+                    pageID: pageID,
+                    text: L10n.Review.ocrNoExplicitValue,
+                    category: .birthday,
+                    confidence: labelConfidence,
+                    boundingBox: observedLabel.boundingBox,
+                    labelBoundingBox: observedLabel.boundingBox,
+                    detectionKind: .labelFallback
+                )) < fallbackMergeScore(value: right, fallback: OCRSensitiveCandidate(
+                    pageID: pageID,
+                    text: L10n.Review.ocrNoExplicitValue,
+                    category: .birthday,
+                    confidence: labelConfidence,
+                    boundingBox: observedLabel.boundingBox,
+                    labelBoundingBox: observedLabel.boundingBox,
+                    detectionKind: .labelFallback
+                ))
+            }
+            .first
     }
 
     private static func inlineValueCandidate(
@@ -2571,6 +2949,30 @@ struct DefaultOCRService: OCRService {
         }
 
         return nil
+    }
+
+    private static func birthdayIDValueIsNear(
+        labelBox: NormalizedRect,
+        valueBox: NormalizedRect
+    ) -> Bool {
+        if labelValueProximity(labelBox: labelBox, valueBox: valueBox) != nil {
+            return true
+        }
+
+        let rowHeight = max(labelBox.height, valueBox.height)
+        let rightGap = valueBox.x - labelBox.maxX
+        let centerDeltaY = abs(labelBox.centerY - valueBox.centerY)
+        if rightGap >= -0.04,
+           rightGap <= 0.82,
+           centerDeltaY <= max(rowHeight * 1.35, 0.035) {
+            return true
+        }
+
+        let verticalGap = valueBox.y - labelBox.maxY
+        let centerDeltaX = abs(labelBox.centerX - valueBox.centerX)
+        return verticalGap >= -0.02
+            && verticalGap <= max(labelBox.height * 4.0, 0.14)
+            && centerDeltaX <= max(labelBox.width, valueBox.width) * 1.05 + 0.12
     }
 
     private static func sameRowLeftLabelScore(
@@ -3871,8 +4273,64 @@ struct DefaultOCRService: OCRService {
                 privateOCRRegressionTextItem("名:", box: givenNameLabelBox)
             ]
         )
+        let strictHospitalHeaderCase1 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem(
+                    "华中科技大学同济医学院附属协和医院 耳鼻咽喉头颈外科 ABR报告单",
+                    box: NormalizedRect(x: 0.08, y: 0.04, width: 0.760, height: 0.026)
+                )
+            ]
+        )
+        let strictHospitalHeaderCase2 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem(
+                    "北京协和医院 检验科 检验报告单",
+                    box: NormalizedRect(x: 0.08, y: 0.04, width: 0.480, height: 0.026)
+                )
+            ]
+        )
 
         return [
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 1 hospital header split",
+                passed: privateOCRRegressionHasCandidate(
+                    strictHospitalHeaderCase1,
+                    category: .hospital,
+                    text: "华中科技大学同济医学院附属协和医院"
+                )
+                    && privateOCRRegressionHasCandidate(
+                        strictHospitalHeaderCase1,
+                        category: .department,
+                        text: "耳鼻咽喉头颈外科"
+                    )
+                    && !privateOCRRegressionHasHospital(
+                        strictHospitalHeaderCase1,
+                        containing: "耳鼻咽喉头颈外科"
+                    )
+                    && !privateOCRRegressionHasHospital(
+                        strictHospitalHeaderCase1,
+                        containing: "ABR报告单"
+                    )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 2 generic hospital header",
+                passed: privateOCRRegressionHasCandidate(
+                    strictHospitalHeaderCase2,
+                    category: .hospital,
+                    text: "北京协和医院"
+                )
+                    && privateOCRRegressionHasCandidate(
+                        strictHospitalHeaderCase2,
+                        category: .department,
+                        text: "检验科"
+                    )
+                    && !privateOCRRegressionHasHospital(
+                        strictHospitalHeaderCase2,
+                        containing: "检验报告单"
+                    )
+            ),
             PrivateOCRRegressionCheckResult(
                 name: "Case 2 phone label with value",
                 passed: privateOCRRegressionHasSinglePhone(case1, title: "电话", text: "13800000000")
@@ -3959,7 +4417,7 @@ struct DefaultOCRService: OCRService {
                     && !isLikelyValue("ABR", for: .name)
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 2 birthday label",
+                name: "Strict Case 3 birthday label",
                 passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
                     strictCase1,
                     category: .birthday,
@@ -3967,7 +4425,7 @@ struct DefaultOCRService: OCRService {
                 )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 3 birth date alias",
+                name: "Strict Case 4 birth date alias",
                 passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
                     strictCase2,
                     category: .birthday,
@@ -3975,7 +4433,7 @@ struct DefaultOCRService: OCRService {
                 )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 4 DOB alias",
+                name: "Strict Case 5 DOB alias",
                 passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
                     strictCase3,
                     category: .birthday,
@@ -3983,7 +4441,7 @@ struct DefaultOCRService: OCRService {
                 )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 5 report/test date alias",
+                name: "Extra strict report/test date alias",
                 passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
                     strictCase5,
                     category: .examDate,
@@ -4196,10 +4654,59 @@ struct DefaultOCRService: OCRService {
         let strictDuplicateEmailFallbackDetected = strictCandidates
             .filter { $0.category == .email && $0.detectionKind == .labelFallback }
             .count > 1
+        let strictHospitalCandidateDetected = strictCandidates.contains { $0.category == .hospital }
+        let expectedPrivateHospital = normalizedOCRLabelText("华中科技大学同济医学院附属协和医院")
+        let strictHospitalHeaderDetected = strictCandidates.contains {
+            $0.category == .hospital
+                && normalizedOCRLabelText($0.text) == expectedPrivateHospital
+        }
+        let strictHospitalEndsWithExpectedSuffix = strictCandidates.contains {
+            $0.category == .hospital && normalizedOCRLabelText($0.text).hasSuffix("协和医院")
+        }
+        let strictBadHospitalHeaderDetected = strictCandidates.contains {
+            guard $0.category == .hospital else {
+                return false
+            }
+
+            let normalizedHospital = normalizedOCRLabelText($0.text)
+            return normalizedHospital.contains(normalizedOCRLabelText("耳鼻咽喉头颈外科"))
+                || normalizedHospital.contains(normalizedOCRLabelText("ABR报告单"))
+        }
+        let birthdaySourcePresent = labelRules
+            .first(where: { $0.category == .birthday })
+            .map { birthdayRule in
+                textItems.contains { birthdayRule.matches($0.text) }
+            } ?? false
+        let strictBirthdayValueDetected = strictCandidates.contains {
+            $0.category == .birthday
+                && $0.detectionKind != .labelFallback
+                && normalizedDateValue($0.text) != nil
+        }
 
         let checks = [
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 1 private test date is exam date only",
+                name: "Strict private hospital candidate exists",
+                passed: strictHospitalCandidateDetected
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict private hospital has expected suffix",
+                passed: strictHospitalEndsWithExpectedSuffix
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 6 private hospital header split",
+                passed: (strictHospitalHeaderDetected || strictHospitalEndsWithExpectedSuffix)
+                    && !strictBadHospitalHeaderDetected
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict private birthday source label present",
+                passed: birthdaySourcePresent
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 6 private birthday value detected",
+                passed: strictBirthdayValueDetected
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 6 private test date is exam date only",
                 passed: strictExamDateCandidates.count == 1 && strictIncorrectDateCandidates.isEmpty
             ),
             PrivateOCRRegressionCheckResult(
@@ -4598,6 +5105,25 @@ struct DefaultOCRService: OCRService {
             && privateOCRRegressionHasName(candidates, equalTo: expectedText)
     }
 
+    private static func privateOCRRegressionHasCandidate(
+        _ candidates: [OCRSensitiveCandidate],
+        category: OCRCandidateCategory,
+        text expectedText: String
+    ) -> Bool {
+        candidates.contains {
+            $0.category == category && $0.text == expectedText
+        }
+    }
+
+    private static func privateOCRRegressionHasHospital(
+        _ candidates: [OCRSensitiveCandidate],
+        containing text: String
+    ) -> Bool {
+        candidates.contains {
+            $0.category == .hospital && $0.text.contains(text)
+        }
+    }
+
     private static func privateOCRRegressionHasSingleNameFallback(
         _ candidates: [OCRSensitiveCandidate],
         title expectedTitle: String
@@ -4717,6 +5243,11 @@ private struct OCRPhoneValueMatch {
     let digitCount: Int
 }
 
+private struct OCRChineseIDMatch {
+    let value: String
+    let range: NSRange
+}
+
 private struct OCRPhoneValueFragment {
     let value: String
     let boundingBox: NormalizedRect
@@ -4775,6 +5306,12 @@ private struct OCRDateBinding {
     let labelBoundingBox: NormalizedRect
     let reason: String
     let score: Double
+}
+
+private struct OCRHeaderField {
+    let category: OCRCandidateCategory
+    let text: String
+    let range: NSRange
 }
 
 private enum OCRValueSearchMode {
@@ -5057,6 +5594,47 @@ private let medicalNumberLabelPatterns: [String] = [
     "检验号",
     "报告单号"
 ]
+
+private let hospitalHeaderSuffixes: [String] = [
+    "妇幼保健院",
+    "医疗中心",
+    "医学中心",
+    "中心医院",
+    "专科医院",
+    "卫生院",
+    "门诊部",
+    "医院"
+]
+
+private let departmentHeaderSuffixes: [String] = [
+    "耳鼻咽喉头颈外科",
+    "耳鼻咽喉科",
+    "神经内科",
+    "内分泌科",
+    "检验科",
+    "影像科",
+    "外科",
+    "内科",
+    "门诊",
+    "病区",
+    "科"
+]
+
+private let reportTitlePatterns: [String] = [
+    "检查报告单",
+    "检验报告单",
+    "检查报告",
+    "检验报告",
+    "门诊病历",
+    "住院病历",
+    "报告单",
+    "申请单",
+    "处方笺",
+    "病历"
+]
+
+private let headerTrimCharacters = CharacterSet.whitespacesAndNewlines
+    .union(CharacterSet(charactersIn: ":：;；,，.。|/\\-_—–－"))
 
 private let birthdayLabelPatterns: [String] = [
     "生日",
