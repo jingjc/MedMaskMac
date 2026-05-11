@@ -2546,13 +2546,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "OCR options changed. Run OCR again."
+            "value" : "Detection settings changed. Rerun OCR for the current page."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "OCR 选项已变更，请重新识别。"
+            "value" : "检测设置已变更，请重新识别当前页。"
           }
         }
       }

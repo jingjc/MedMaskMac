@@ -213,7 +213,7 @@ struct DefaultOCRService: OCRService {
         for item in textItems {
             for rule in targetRules where includedCategories.contains(rule.category) {
                 for match in rule.matches(in: item.text) {
-                    guard !isForbiddenStandardNameTargetMatch(
+                    guard !isForbiddenPatientNameTargetMatch(
                         rule: rule,
                         match: match,
                         in: item.text,
@@ -369,7 +369,7 @@ struct DefaultOCRService: OCRService {
         to candidates: inout [OCRSensitiveCandidate]
     ) {
         let includedCategories = options.includedCategories
-        let consumedSplitNameLabelIndexes = appendStandardSplitNameLabelCandidates(
+        let consumedSplitNameLabelIndexes = appendPatientSplitNameLabelCandidates(
             from: textItems,
             pageID: pageID,
             options: options,
@@ -385,7 +385,7 @@ struct DefaultOCRService: OCRService {
             }
 
             for labelRule in labelRules where includedCategories.contains(labelRule.category) && labelRule.matches(labelItem.text) {
-                guard !isForbiddenStandardNameLabelMatch(
+                guard !isForbiddenPatientNameLabelMatch(
                     labelRule: labelRule,
                     labelText: labelItem.text,
                     options: options
@@ -419,14 +419,14 @@ struct DefaultOCRService: OCRService {
         }
     }
 
-    private static func appendStandardSplitNameLabelCandidates(
+    private static func appendPatientSplitNameLabelCandidates(
         from textItems: [OCRTextItem],
         pageID: PageItem.ID,
         options: OCRDetectionOptions,
         context: OCRProcessingContext,
         to candidates: inout [OCRSensitiveCandidate]
     ) -> Set<Int> {
-        guard options.preset == .standard,
+        guard options.preset == .standard || options.preset == .strict,
               options.includedCategories.contains(.name) else {
             return []
         }
@@ -1104,6 +1104,57 @@ struct DefaultOCRService: OCRService {
         return nil
     }
 
+    private static func lastLabelTextMatch(
+        for labelRule: OCRLabelRule,
+        in text: String
+    ) -> OCRLabelTextMatch? {
+        if labelRule.category == .name, isForbiddenNameLabelText(text) {
+            return nil
+        }
+
+        let nsText = text as NSString
+        let fullRange = NSRange(location: 0, length: nsText.length)
+        var bestMatch: OCRLabelTextMatch?
+
+        for pattern in labelRule.labelPatterns {
+            let normalizedPattern = normalizedOCRLabelText(pattern)
+            if isSingleCharacterSplitNameLabelPattern(normalizedPattern),
+               normalizedSplitNameLabelText(text) != normalizedPattern {
+                continue
+            }
+
+            let escapedPattern = NSRegularExpression.escapedPattern(for: pattern)
+            let regex = try! NSRegularExpression(
+                pattern: "\(escapedPattern)\\s*[:：;；]?",
+                options: [.caseInsensitive]
+            )
+
+            for match in regex.matches(in: text, range: fullRange) {
+                let candidate = OCRLabelTextMatch(
+                    title: sanitizedSourceLabelTitle(pattern),
+                    range: match.range
+                )
+                guard let currentBest = bestMatch else {
+                    bestMatch = candidate
+                    continue
+                }
+
+                let candidateEnd = rangeUpperBound(candidate.range)
+                let bestEnd = rangeUpperBound(currentBest.range)
+                if candidateEnd > bestEnd
+                    || (candidateEnd == bestEnd && candidate.range.length > currentBest.range.length) {
+                    bestMatch = candidate
+                }
+            }
+        }
+
+        return bestMatch
+    }
+
+    private static func rangeUpperBound(_ range: NSRange) -> Int {
+        range.location + range.length
+    }
+
     private static func sanitizedSourceLabelTitle(_ text: String) -> String {
         normalizedOCRValueText(text)
             .trimmingCharacters(
@@ -1493,8 +1544,10 @@ struct DefaultOCRService: OCRService {
             return nil
         }
 
-        let valueItem = if options.preset == .standard,
-                           labelRule.category == .phone {
+        let valueItem = if usesStandardPhoneExtraction(
+            for: labelRule.category,
+            options: options
+        ) {
             nearestValueItem(
                 for: observedLabel.boundingBox,
                 category: labelRule.category,
@@ -1535,8 +1588,7 @@ struct DefaultOCRService: OCRService {
             )
         }
 
-        if options.preset == .standard,
-           labelRule.category == .phone,
+        if usesStandardPhoneExtraction(for: labelRule.category, options: options),
            let sameRowCandidate = phoneSameRowValueCandidate(
                labelRule: labelRule,
                labelItem: labelItem,
@@ -1548,8 +1600,7 @@ struct DefaultOCRService: OCRService {
             return sameRowCandidate
         }
 
-        if options.preset == .standard,
-           labelRule.category == .phone,
+        if usesStandardPhoneExtraction(for: labelRule.category, options: options),
            let roiCandidate = phoneRowOCRValueCandidate(
                labelRule: labelRule,
                labelItem: labelItem,
@@ -1561,9 +1612,10 @@ struct DefaultOCRService: OCRService {
         }
 
         let fallbackBox: NormalizedRect
-        if labelRule.category == .name, options.preset == .standard {
+        if labelRule.category == .name,
+           options.preset == .standard || options.preset == .strict {
             fallbackBox = likelyNameFillArea(toRightOf: observedLabel.boundingBox)
-        } else if labelRule.category == .phone, options.preset == .standard {
+        } else if usesStandardPhoneExtraction(for: labelRule.category, options: options) {
             fallbackBox = phoneFallbackBox(
                 toRightOf: observedLabel.boundingBox,
                 labelRule: labelRule,
@@ -1653,6 +1705,13 @@ struct DefaultOCRService: OCRService {
         }
 
         return title
+    }
+
+    private static func usesStandardPhoneExtraction(
+        for category: OCRCandidateCategory,
+        options: OCRDetectionOptions
+    ) -> Bool {
+        category == .phone && (options.preset == .standard || options.preset == .strict)
     }
 
     private static func nearestValueItem(
@@ -2383,21 +2442,22 @@ struct DefaultOCRService: OCRService {
         includedCategories: Set<OCRCandidateCategory>
     ) -> OCRDateBinding? {
         let labelRules = dateBindingLabelRules(includedCategories: includedCategories)
-
-        if let sameObservationBinding = sameObservationDateBinding(
+        let sameObservationBinding = sameObservationDateBinding(
             match: match,
             valueItem: valueItem,
             labelRules: labelRules
-        ) {
-            return sameObservationBinding
-        }
-
-        return nearbyDateLabelBinding(
+        )
+        let nearbyBinding = nearbyDateLabelBinding(
             valueBox: valueBox,
             valueItem: valueItem,
             textItems: textItems,
             labelRules: labelRules
         )
+
+        return [sameObservationBinding, nearbyBinding]
+            .compactMap(\.self)
+            .sorted(by: dateBindingPrecedes)
+            .first
     }
 
     private static func sameObservationDateBinding(
@@ -2414,16 +2474,30 @@ struct DefaultOCRService: OCRService {
         let prefix = nsText.substring(to: match.targetRange.location)
         return labelRules
             .compactMap { labelRule -> OCRDateBinding? in
-                guard labelRule.matches(prefix) else {
+                guard let labelMatch = lastLabelTextMatch(for: labelRule, in: prefix) else {
                     return nil
                 }
 
+                let labelBounds = appNormalizedRect(
+                    for: labelMatch.range,
+                    in: valueItem.recognizedText,
+                    text: valueItem.text,
+                    fallbackBounds: valueItem.boundingBox
+                ) ?? valueItem.boundingBox
+                let labelDistance = max(0, match.targetRange.location - rangeUpperBound(labelMatch.range))
+                guard labelDistance <= 16 else {
+                    return nil
+                }
+
+                let score = Double(labelDistance) / max(Double(nsText.length), 1)
+                    + Double(dateCategoryPriority(labelRule.category)) * 0.001
+
                 return OCRDateBinding(
                     category: labelRule.category,
-                    labelText: prefix.trimmingCharacters(in: .whitespacesAndNewlines),
-                    labelBoundingBox: valueItem.boundingBox,
+                    labelText: labelMatch.title,
+                    labelBoundingBox: labelBounds,
                     reason: "same observation prefix",
-                    score: Double(dateCategoryPriority(labelRule.category))
+                    score: score
                 )
             }
             .sorted(by: dateBindingPrecedes)
@@ -2453,7 +2527,7 @@ struct DefaultOCRService: OCRService {
                         labelText: labelItem.text,
                         labelBoundingBox: labelItem.boundingBox,
                         reason: proximity.reason,
-                        score: proximity.score + Double(dateCategoryPriority(labelRule.category)) * 10
+                        score: proximity.score + Double(dateCategoryPriority(labelRule.category)) * 0.001
                     )
                 }
             }
@@ -2465,11 +2539,15 @@ struct DefaultOCRService: OCRService {
         _ left: OCRDateBinding,
         _ right: OCRDateBinding
     ) -> Bool {
+        if left.score != right.score {
+            return left.score < right.score
+        }
+
         if dateCategoryPriority(left.category) != dateCategoryPriority(right.category) {
             return dateCategoryPriority(left.category) < dateCategoryPriority(right.category)
         }
 
-        return left.score < right.score
+        return false
     }
 
     private static func dateBindingLabelRules(includedCategories: Set<OCRCandidateCategory>) -> [OCRLabelRule] {
@@ -2923,6 +3001,10 @@ struct DefaultOCRService: OCRService {
             return false
         }
 
+        if isDateCategory(left.category), isDateCategory(right.category) {
+            return true
+        }
+
         return sameLocation
     }
 
@@ -3021,8 +3103,8 @@ struct DefaultOCRService: OCRService {
 
             if isDateCategory(candidate.category),
                isDateCategory(existingCandidate.category),
-               dateCategoryPriority(candidate.category) != dateCategoryPriority(existingCandidate.category) {
-                return dateCategoryPriority(candidate.category) < dateCategoryPriority(existingCandidate.category)
+               dateDuplicatePreferencePriority(candidate.category) != dateDuplicatePreferencePriority(existingCandidate.category) {
+                return dateDuplicatePreferencePriority(candidate.category) < dateDuplicatePreferencePriority(existingCandidate.category)
             }
 
             if candidate.detectionKind == .labelValue,
@@ -3051,6 +3133,19 @@ struct DefaultOCRService: OCRService {
             1
         case .labelFallback:
             2
+        }
+    }
+
+    private static func dateDuplicatePreferencePriority(_ category: OCRCandidateCategory) -> Int {
+        switch category {
+        case .examDate:
+            0
+        case .birthday:
+            1
+        case .date:
+            2
+        default:
+            3
         }
     }
 
@@ -3500,13 +3595,13 @@ struct DefaultOCRService: OCRService {
         isForbiddenNameValueText(text)
     }
 
-    private static func isForbiddenStandardNameTargetMatch(
+    private static func isForbiddenPatientNameTargetMatch(
         rule: OCRTargetRule,
         match: OCRTargetMatch,
         in text: String,
         options: OCRDetectionOptions
     ) -> Bool {
-        guard options.preset == .standard,
+        guard options.preset == .standard || options.preset == .strict,
               rule.category == .name else {
             return false
         }
@@ -3518,12 +3613,12 @@ struct DefaultOCRService: OCRService {
         return isStandardForbiddenNameLabelText(prefix)
     }
 
-    private static func isForbiddenStandardNameLabelMatch(
+    private static func isForbiddenPatientNameLabelMatch(
         labelRule: OCRLabelRule,
         labelText: String,
         options: OCRDetectionOptions
     ) -> Bool {
-        options.preset == .standard
+        (options.preset == .standard || options.preset == .strict)
             && labelRule.category == .name
             && isStandardForbiddenNameLabelText(labelText)
     }
@@ -3597,7 +3692,8 @@ struct DefaultOCRService: OCRService {
 
         return privateOCRRegressionFixtureResult(
             candidates: candidates,
-            textItems: textItems
+            textItems: textItems,
+            pageID: page.id
         )
     }
 
@@ -3756,6 +3852,25 @@ struct DefaultOCRService: OCRService {
                 privateOCRRegressionTextItem("user@example.com", box: NormalizedRect(x: 0.240, y: 0.30, width: 0.220, height: 0.020))
             ]
         )
+        let strictCase12 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("电话：13800000000", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.320, height: 0.020))
+            ]
+        )
+        let strictCase13 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试者：张三", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.180, height: 0.020))
+            ]
+        )
+        let strictCase14 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("姓:", box: surnameLabelBox),
+                privateOCRRegressionTextItem("名:", box: givenNameLabelBox)
+            ]
+        )
 
         return [
             PrivateOCRRegressionCheckResult(
@@ -3844,7 +3959,7 @@ struct DefaultOCRService: OCRService {
                     && !isLikelyValue("ABR", for: .name)
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 1 birthday label",
+                name: "Strict Case 2 birthday label",
                 passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
                     strictCase1,
                     category: .birthday,
@@ -3852,7 +3967,7 @@ struct DefaultOCRService: OCRService {
                 )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 2 birth date alias",
+                name: "Strict Case 3 birth date alias",
                 passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
                     strictCase2,
                     category: .birthday,
@@ -3860,7 +3975,7 @@ struct DefaultOCRService: OCRService {
                 )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 3 DOB alias",
+                name: "Strict Case 4 DOB alias",
                 passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
                     strictCase3,
                     category: .birthday,
@@ -3868,17 +3983,17 @@ struct DefaultOCRService: OCRService {
                 )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 4 exam test date",
+                name: "Strict Case 5 report/test date alias",
                 passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
-                    strictCase4,
+                    strictCase5,
                     category: .examDate,
                     text: "2023-07-21"
                 )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 5 report date alias",
+                name: "Extra strict test date alias",
                 passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
-                    strictCase5,
+                    strictCase4,
                     category: .examDate,
                     text: "2023-07-21"
                 )
@@ -3892,7 +4007,7 @@ struct DefaultOCRService: OCRService {
                 )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 7 duplicate birthday date",
+                name: "Extra strict duplicate birthday date",
                 passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
                     strictCase7,
                     category: .birthday,
@@ -3900,7 +4015,7 @@ struct DefaultOCRService: OCRService {
                 )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 8 duplicate test date variants",
+                name: "Strict Case 7 duplicate test date variants",
                 passed: privateOCRRegressionHasOnlyCanonicalDateCandidate(
                     strictCase8,
                     category: .examDate,
@@ -3908,7 +4023,7 @@ struct DefaultOCRService: OCRService {
                 )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 9 email fallback",
+                name: "Strict Case 8 email fallback",
                 passed: privateOCRRegressionHasOnlyCandidate(
                     strictCase9,
                     category: .email,
@@ -3917,7 +4032,7 @@ struct DefaultOCRService: OCRService {
                 )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 10 duplicate email fallback",
+                name: "Strict Case 9 duplicate email fallback",
                 passed: privateOCRRegressionHasOnlyCandidate(
                     strictCase10,
                     category: .email,
@@ -3926,7 +4041,7 @@ struct DefaultOCRService: OCRService {
                 )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 11 email value beats fallback",
+                name: "Strict Case 10 email value beats fallback",
                 passed: privateOCRRegressionHasOnlyCandidate(
                     strictCase11,
                     category: .email,
@@ -3936,11 +4051,24 @@ struct DefaultOCRService: OCRService {
                     && strictCase11.first.map { $0.detectionKind != .labelFallback } == true
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 13 Standard phone label preservation",
+                name: "Strict Case 11 phone extraction",
+                passed: privateOCRRegressionHasSinglePhone(strictCase12, title: "电话", text: "13800000000")
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 12 tester is not patient name",
+                passed: strictCase13.filter { $0.category == .name }.isEmpty
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 13 no standalone surname title",
+                passed: privateOCRRegressionHasSingleNameFallback(strictCase14, title: "姓名")
+                    && !strictCase14.contains { $0.displayTitle == "姓" }
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Standard Case 15 phone label preservation",
                 passed: privateOCRRegressionHasSinglePhone(case1, title: "电话", text: "13800000000")
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 14 Standard name false positive blocked",
+                name: "Standard Case 16 name false positive blocked",
                 passed: caseF.filter { $0.category == .name }.isEmpty
             )
         ]
@@ -3948,8 +4076,15 @@ struct DefaultOCRService: OCRService {
 
     private static func privateOCRRegressionFixtureResult(
         candidates: [OCRSensitiveCandidate],
-        textItems: [OCRTextItem]
+        textItems: [OCRTextItem],
+        pageID: PageItem.ID
     ) -> PrivateOCRRegressionFixtureResult {
+        let strictCandidates = buildCandidates(
+            from: textItems,
+            pageID: pageID,
+            options: OCRDetectionOptions(preset: .strict, customFields: []),
+            context: .empty
+        )
         let nameCandidates = candidates.filter { $0.category == .name }
         let phoneCandidates = candidates.filter { $0.category == .phone }
         let nonPatientRows = privateOCRRegressionRows(
@@ -4038,8 +4173,51 @@ struct DefaultOCRService: OCRService {
             privateOCRRegressionCandidate(candidate, isSourcedFrom: nonPatientRows)
                 || privateOCRRegressionCandidate(candidate, isSourcedFrom: forbiddenNameRows)
         }
+        let strictExamDateCandidates = strictCandidates.filter {
+            $0.category == .examDate && $0.text == "2023-07-21"
+        }
+        let strictIncorrectDateCandidates = strictCandidates.filter {
+            ($0.category == .birthday || $0.category == .date) && $0.text == "2023-07-21"
+        }
+        let strictPhoneCandidate = phoneRows.first.flatMap { phoneRow in
+            strictCandidates.first { $0.category == .phone && $0.displayTitle == phoneRow.title }
+        } ?? strictCandidates.first { $0.category == .phone }
+        let strictPhoneValueExtracted = strictPhoneCandidate.map { candidate in
+            candidate.detectionKind != .labelFallback
+                && phoneValueIsAcceptable(String(candidate.text.filter(\.isNumber)))
+        } ?? false
+        let strictStandaloneSurnameTitleDetected = strictCandidates.contains {
+            $0.category == .name && $0.displayTitle == "姓"
+        }
+        let strictTesterNameContaminationDetected = strictCandidates.contains { candidate in
+            candidate.category == .name
+                && privateOCRRegressionCandidate(candidate, isContaminatedBy: nonPatientRows)
+        }
+        let strictDuplicateEmailFallbackDetected = strictCandidates
+            .filter { $0.category == .email && $0.detectionKind == .labelFallback }
+            .count > 1
 
         let checks = [
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 1 private test date is exam date only",
+                passed: strictExamDateCandidates.count == 1 && strictIncorrectDateCandidates.isEmpty
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict private phone is value extraction",
+                passed: strictPhoneValueExtracted
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict private no standalone surname title",
+                passed: !strictStandaloneSurnameTitleDetected
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict private no tester/operator patient name",
+                passed: !strictTesterNameContaminationDetected
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict private email fallback deduplicated",
+                passed: !strictDuplicateEmailFallbackDetected
+            ),
             PrivateOCRRegressionCheckResult(name: "Case A exactly one patient name candidate", passed: exactlyOneNameCandidate),
             PrivateOCRRegressionCheckResult(name: "Case A no duplicate name candidates", passed: !duplicateNameCandidatesDetected),
             PrivateOCRRegressionCheckResult(name: "Case A no tester/operator contamination", passed: !testerOperatorContaminationDetected),
@@ -4418,6 +4596,20 @@ struct DefaultOCRService: OCRService {
     ) -> Bool {
         candidates.filter { $0.category == .name }.count == 1
             && privateOCRRegressionHasName(candidates, equalTo: expectedText)
+    }
+
+    private static func privateOCRRegressionHasSingleNameFallback(
+        _ candidates: [OCRSensitiveCandidate],
+        title expectedTitle: String
+    ) -> Bool {
+        let nameCandidates = candidates.filter { $0.category == .name }
+        guard nameCandidates.count == 1,
+              let nameCandidate = nameCandidates.first else {
+            return false
+        }
+
+        return nameCandidate.displayTitle == expectedTitle
+            && nameCandidate.detectionKind == .labelFallback
     }
 
     private static func privateOCRRegressionHasSinglePhone(
@@ -4919,11 +5111,13 @@ private let examDateLabelPatterns: [String] = [
     "入院日期",
     "出院日期",
     "打印日期",
+    "打印于",
     "审核日期",
     "发布日期",
     "诊断日期",
     "检验日期",
     "检验时间",
+    "测试时间",
     "检查时间",
     "报告时间",
     "采样时间",
