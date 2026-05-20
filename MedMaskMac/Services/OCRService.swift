@@ -71,6 +71,11 @@ struct PrivateOCRRegressionFixtureResult {
     let strictBirthdayPresent: Bool
     let strictExamDatePresent: Bool
     let strictPhoneValueExtraction: Bool
+    let strictEmailBlankSuppressed: Bool
+    let strictEmailCandidateCount: Int
+    let strictEmailFallbackCount: Int
+    let strictStaffCandidateIfVisible: Bool
+    let strictStaffNotMergedIntoName: Bool
     let standardRegressionStillPassing: Bool
     let totalCandidateCount: Int
     let candidateSummaries: [PrivateOCRRegressionCandidateSummary]
@@ -1448,7 +1453,17 @@ struct DefaultOCRService: OCRService {
             for: .name,
             fallbackBox: fallbackBox,
             options: options
-        ) else {
+        ),
+              fallbackRegionHasVisibleContent(
+                  category: .name,
+                  labelRule: nil,
+                  labelItem: nil,
+                  labelBox: group.labelBoundingBox,
+                  fallbackBox: fallbackBox,
+                  textItems: textItems,
+                  excluding: group.itemIndexes,
+                  context: context
+              ) else {
             return nil
         }
 
@@ -1759,6 +1774,11 @@ struct DefaultOCRService: OCRService {
                     range: NSRange(location: 0, length: rangeLength)
                 )
             }
+        }
+
+        if labelRule.category == .staffSignature,
+           let fuzzyMatch = fuzzyStaffSignatureLabelTextMatch(in: text) {
+            return fuzzyMatch
         }
 
         return nil
@@ -2222,7 +2242,8 @@ struct DefaultOCRService: OCRService {
                 observedLabel: observedLabel,
                 textItems: textItems,
                 pageID: pageID,
-                options: options
+                options: options,
+                context: context
             )
         }
 
@@ -2343,7 +2364,17 @@ struct DefaultOCRService: OCRService {
             for: labelRule.category,
             fallbackBox: fallbackBox,
             options: options
-        ) else {
+        ),
+              fallbackRegionHasVisibleContent(
+                  category: labelRule.category,
+                  labelRule: labelRule,
+                  labelItem: labelItem,
+                  labelBox: observedLabel.boundingBox,
+                  fallbackBox: fallbackBox,
+                  textItems: textItems,
+                  excluding: [labelIndex],
+                  context: context
+              ) else {
             return nil
         }
 
@@ -2370,7 +2401,8 @@ struct DefaultOCRService: OCRService {
         observedLabel: OCRObservedLabel,
         textItems: [OCRTextItem],
         pageID: PageItem.ID,
-        options: OCRDetectionOptions
+        options: OCRDetectionOptions,
+        context: OCRProcessingContext
     ) -> OCRSensitiveCandidate? {
         let labelTitle = sourceLabelText(
             observedLabel.title,
@@ -2418,6 +2450,31 @@ struct DefaultOCRService: OCRService {
             )
         }
 
+        let fallbackBox = staffSignatureFallbackBox(
+            toRightOf: observedLabel.boundingBox,
+            labelRule: labelRule,
+            labelItem: labelItem,
+            textItems: textItems,
+            excluding: [labelIndex]
+        )
+        guard allowsLabelFallback(
+            for: .staffSignature,
+            fallbackBox: fallbackBox,
+            options: options
+        ),
+              fallbackRegionHasVisibleContent(
+                  category: .staffSignature,
+                  labelRule: labelRule,
+                  labelItem: labelItem,
+                  labelBox: observedLabel.boundingBox,
+                  fallbackBox: fallbackBox,
+                  textItems: textItems,
+                  excluding: [labelIndex],
+                  context: context
+              ) else {
+            return nil
+        }
+
         return OCRSensitiveCandidate(
             pageID: pageID,
             text: L10n.Review.ocrNoExplicitValue,
@@ -2425,13 +2482,7 @@ struct DefaultOCRService: OCRService {
             valueState: .regionOnly,
             sourceLabelText: labelTitle,
             confidence: labelItem.confidence,
-            boundingBox: staffSignatureFallbackBox(
-                toRightOf: observedLabel.boundingBox,
-                labelRule: labelRule,
-                labelItem: labelItem,
-                textItems: textItems,
-                excluding: [labelIndex]
-            ),
+            boundingBox: fallbackBox,
             labelBoundingBox: observedLabel.boundingBox,
             detectionKind: .labelFallback
         )
@@ -2903,6 +2954,219 @@ struct DefaultOCRService: OCRService {
             && rightGap <= 0.52
             && verticalCenterDelta <= max(labelBox.height, valueBox.height) * 1.05
             && valueBox.maxX <= min(labelBox.maxX + 0.70, 1)
+    }
+
+    private static func fallbackRegionHasVisibleContent(
+        category: OCRCandidateCategory,
+        labelRule: OCRLabelRule?,
+        labelItem: OCRTextItem?,
+        labelBox: NormalizedRect,
+        fallbackBox: NormalizedRect,
+        textItems: [OCRTextItem],
+        excluding excludedIndexes: Set<Int>,
+        context: OCRProcessingContext
+    ) -> Bool {
+        if let labelRule,
+           let labelItem,
+           let inlineValueRange = labelRule.inlineValueRange(
+               in: labelItem.text,
+               allowsNameWithSpaces: category == .name
+           ) {
+            let inlineValue = (labelItem.text as NSString)
+                .substring(with: inlineValueRange)
+            if valueRegionTextIsPlausibleFallbackEvidence(
+                inlineValue,
+                for: category,
+                confidence: labelItem.confidence
+            ) {
+                return true
+            }
+        }
+
+        let textEvidence = textItems.enumerated().contains { index, item in
+            guard !excludedIndexes.contains(index),
+                  valueRegionTextIsPlausibleFallbackEvidence(
+                      item.text,
+                      for: category,
+                      confidence: item.confidence
+                  ),
+                  valueEvidenceBox(item.boundingBox, overlaps: fallbackBox, labelBox: labelBox) else {
+                return false
+            }
+
+            return true
+        }
+        if textEvidence {
+            return true
+        }
+
+        guard categoryAllowsImageOnlyFallbackContent(category),
+              let sourceImage = context.sourceImage else {
+            return false
+        }
+
+        return imageRegionContainsMeaningfulInk(sourceImage, in: fallbackBox)
+    }
+
+    private static func categoryAllowsImageOnlyFallbackContent(_ category: OCRCandidateCategory) -> Bool {
+        category == .name || category == .staffSignature
+    }
+
+    private static func valueRegionTextHasVisibleContent(_ text: String) -> Bool {
+        let normalized = normalizedOCRValueText(text)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty,
+              !isKnownLabelOnlyText(normalized) else {
+            return false
+        }
+
+        let nonContentCharacters = CharacterSet(
+            charactersIn: "_-—–－=:：;；,.。/\\|·• 　一　"
+        )
+        if normalized.unicodeScalars.allSatisfy({
+            nonContentCharacters.contains($0) || CharacterSet.whitespacesAndNewlines.contains($0)
+        }) {
+            return false
+        }
+
+        return true
+    }
+
+    private static func valueRegionTextIsPlausibleFallbackEvidence(
+        _ text: String,
+        for category: OCRCandidateCategory,
+        confidence: Double?
+    ) -> Bool {
+        guard valueRegionTextHasVisibleContent(text) else {
+            return false
+        }
+
+        switch category {
+        case .email:
+            let normalized = normalizedOCRValueText(text).lowercased()
+            return normalized.contains("@")
+                || normalized.range(of: #"(?i)[a-z0-9._%+\-]{2,}\.[a-z0-9□]{1,}"#, options: .regularExpression) != nil
+        case .phone, .fax:
+            return !text.filter(\.isNumber).isEmpty
+        default:
+            return true
+        }
+    }
+
+    private static func valueEvidenceBox(
+        _ valueBox: NormalizedRect,
+        overlaps fallbackBox: NormalizedRect,
+        labelBox: NormalizedRect
+    ) -> Bool {
+        let intersectionArea = normalizedRectIntersectionArea(valueBox, fallbackBox)
+        let valueArea = valueBox.width * valueBox.height
+        let fallbackArea = fallbackBox.width * fallbackBox.height
+        let overlapsFallback = valueArea > 0 && intersectionArea / valueArea >= 0.18
+            || fallbackArea > 0 && intersectionArea / fallbackArea >= 0.015
+        if overlapsFallback {
+            return true
+        }
+
+        let verticalCenterDelta = abs(valueBox.centerY - labelBox.centerY)
+        let rightGap = valueBox.x - labelBox.maxX
+        return rightGap >= -0.012
+            && rightGap <= 0.58
+            && verticalCenterDelta <= max(valueBox.height, labelBox.height) * 1.20
+    }
+
+    private static func imageRegionContainsMeaningfulInk(
+        _ sourceImage: CGImage,
+        in normalizedRect: NormalizedRect
+    ) -> Bool {
+        guard let croppedImage = croppedImage(sourceImage, to: normalizedRect) else {
+            return false
+        }
+
+        let maxScanWidth = 640
+        let maxScanHeight = 240
+        let scale = min(
+            1.0,
+            Double(maxScanWidth) / Double(max(croppedImage.width, 1)),
+            Double(maxScanHeight) / Double(max(croppedImage.height, 1))
+        )
+        let width = max(2, Int(Double(croppedImage.width) * scale))
+        let height = max(2, Int(Double(croppedImage.height) * scale))
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+        var pixels = [UInt8](repeating: 255, count: bytesPerRow * height)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+
+        let drewImage = pixels.withUnsafeMutableBytes { rawBuffer -> Bool in
+            guard let context = CGContext(
+                data: rawBuffer.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: bitmapInfo
+            ) else {
+                return false
+            }
+
+            context.interpolationQuality = .none
+            context.draw(croppedImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drewImage else {
+            return false
+        }
+
+        var darkMap = [Bool](repeating: false, count: width * height)
+        var rowCounts = [Int](repeating: 0, count: height)
+        var columnCounts = [Int](repeating: 0, count: width)
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = y * bytesPerRow + x * bytesPerPixel
+                let red = Double(pixels[offset])
+                let green = Double(pixels[offset + 1])
+                let blue = Double(pixels[offset + 2])
+                let alpha = Double(pixels[offset + 3]) / 255.0
+                let luma = 0.299 * red + 0.587 * green + 0.114 * blue
+                guard alpha > 0.12, luma < 185 else {
+                    continue
+                }
+
+                darkMap[y * width + x] = true
+                rowCounts[y] += 1
+                columnCounts[x] += 1
+            }
+        }
+
+        let horizontalLineThreshold = max(8, width / 4)
+        let verticalLineThreshold = max(8, height / 4)
+        let horizontalLineRows = rowCounts.map { $0 >= horizontalLineThreshold }
+        let verticalLineColumns = columnCounts.map { $0 >= verticalLineThreshold }
+        var cleanedDarkPixels = 0
+        var activeRows = [Bool](repeating: false, count: height)
+        var activeColumns = [Bool](repeating: false, count: width)
+
+        for y in 0..<height where !horizontalLineRows[y] {
+            for x in 0..<width where !verticalLineColumns[x] {
+                guard darkMap[y * width + x] else {
+                    continue
+                }
+
+                cleanedDarkPixels += 1
+                activeRows[y] = true
+                activeColumns[x] = true
+            }
+        }
+
+        let totalPixels = width * height
+        let minimumDarkPixels = max(12, totalPixels / 900)
+        let minimumActiveRows = min(10, max(4, height / 16))
+        let minimumActiveColumns = min(10, max(3, width / 80))
+
+        return cleanedDarkPixels >= minimumDarkPixels
+            && activeRows.filter(\.self).count >= minimumActiveRows
+            && activeColumns.filter(\.self).count >= minimumActiveColumns
     }
 
     private static func likelySplitNameFillArea(for group: OCRSplitNameLabelGroup) -> NormalizedRect {
@@ -4976,7 +5240,7 @@ struct DefaultOCRService: OCRService {
             pageID: pageID,
             textItems: [
                 privateOCRRegressionTextItem("电子邮件：", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.120, height: 0.020)),
-                privateOCRRegressionTextItem("电子邮件：", box: NormalizedRect(x: 0.102, y: 0.301, width: 0.120, height: 0.020))
+                privateOCRRegressionTextItem("user@□□", box: NormalizedRect(x: 0.240, y: 0.30, width: 0.090, height: 0.020), confidence: 0.42)
             ]
         )
         let strictCase11 = privateOCRRegressionStrictCandidates(
@@ -5069,6 +5333,19 @@ struct DefaultOCRService: OCRService {
             pageID: pageID,
             textItems: [
                 privateOCRRegressionTextItem("测试者：30岁", box: NormalizedRect(x: 0.10, y: 0.34, width: 0.180, height: 0.020), confidence: 0.92)
+            ]
+        )
+        let staffCase11 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试者：", box: NormalizedRect(x: 0.10, y: 0.34, width: 0.100, height: 0.020), confidence: 0.92)
+            ]
+        )
+        let staffCase12 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试", box: NormalizedRect(x: 0.10, y: 0.34, width: 0.060, height: 0.020), confidence: 0.92),
+                privateOCRRegressionTextItem("□□", box: NormalizedRect(x: 0.185, y: 0.34, width: 0.050, height: 0.020), confidence: 0.42)
             ]
         )
         let strictDuplicateHospitalCase = finalizedCandidates(
@@ -5335,6 +5612,16 @@ struct DefaultOCRService: OCRService {
                     )
             ),
             PrivateOCRRegressionCheckResult(
+                name: "Staff Case 11 empty tester field suppressed",
+                passed: staffCase11.filter { $0.category == .staffSignature }.isEmpty
+                    && staffCase11.filter { $0.category == .name }.isEmpty
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Extra fuzzy tester label with visible region",
+                passed: privateOCRRegressionHasStaffRegionOnly(staffCase12, title: "测试者")
+                    && staffCase12.filter { $0.category == .name }.isEmpty
+            ),
+            PrivateOCRRegressionCheckResult(
                 name: "Case 2 phone label with value",
                 passed: privateOCRRegressionHasSinglePhone(case1, title: "电话", text: "13800000000")
                     && privateOCRRegressionPhoneBoxIsRightOfLabel(case1)
@@ -5348,9 +5635,8 @@ struct DefaultOCRService: OCRService {
                 passed: privateOCRRegressionHasSinglePhone(case3, title: "联系电话", text: "13800000000")
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Case 3 phone label-only same-row region",
-                passed: privateOCRRegressionHasSinglePhone(case4, title: "电话", text: L10n.Review.ocrNoExplicitValue)
-                    && privateOCRRegressionPhoneBoxIsRightOfLabel(case4)
+                name: "Case 3 blank phone field suppressed",
+                passed: case4.filter { $0.category == .phone }.isEmpty
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Case 4 phone box does not cover email",
@@ -5484,22 +5770,18 @@ struct DefaultOCRService: OCRService {
                 )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 8 email fallback",
-                passed: privateOCRRegressionHasOnlyCandidate(
-                    strictCase9,
-                    category: .email,
-                    title: "电子邮件",
-                    text: L10n.Review.ocrNoExplicitValue
-                )
+                name: "Strict Case 8 empty email field suppressed",
+                passed: strictCase9.filter { $0.category == .email }.isEmpty
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 9 duplicate email fallback",
+                name: "Strict Case 9 unreadable email-like region",
                 passed: privateOCRRegressionHasOnlyCandidate(
                     strictCase10,
                     category: .email,
                     title: "电子邮件",
                     text: L10n.Review.ocrNoExplicitValue
                 )
+                    && strictCase10.first.map { $0.valueState == .regionOnly } == true
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Strict Case 10 email value beats fallback",
@@ -5521,7 +5803,7 @@ struct DefaultOCRService: OCRService {
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Strict Case 13 no standalone surname title",
-                passed: privateOCRRegressionHasSingleNameFallback(strictCase14, title: "姓名")
+                passed: strictCase14.filter { $0.category == .name }.isEmpty
                     && !strictCase14.contains { $0.displayTitle == "姓" }
             ),
             PrivateOCRRegressionCheckResult(
@@ -5549,10 +5831,11 @@ struct DefaultOCRService: OCRService {
         )
         let nameCandidates = candidates.filter { $0.category == .name }
         let phoneCandidates = candidates.filter { $0.category == .phone }
+        let staffRows = privateOCRRegressionStaffRows(in: textItems)
         let nonPatientRows = privateOCRRegressionRows(
             matching: standardNonPatientNameLabelTexts,
             in: textItems
-        )
+        ) + staffRows
         let forbiddenNameRows = privateOCRRegressionRows(
             matching: forbiddenNameLabelTexts,
             in: textItems
@@ -5560,10 +5843,6 @@ struct DefaultOCRService: OCRService {
         let phoneRows = privateOCRRegressionPhoneRows(in: textItems)
         let emailRows = privateOCRRegressionRows(
             matching: ["电子邮件", "邮箱", "Email", "E-mail"],
-            in: textItems
-        )
-        let staffRows = privateOCRRegressionRows(
-            matching: staffSignatureLabelPatterns,
             in: textItems
         )
         let splitNameGroups = splitNameLabelGroups(in: textItems)
@@ -5662,14 +5941,28 @@ struct DefaultOCRService: OCRService {
         let strictDuplicateEmailFallbackDetected = strictCandidates
             .filter { $0.category == .email && $0.detectionKind == .labelFallback }
             .count > 1
+        let strictEmailCandidates = strictCandidates.filter { $0.category == .email }
+        let strictEmailFallbackCount = strictEmailCandidates.filter { $0.detectionKind == .labelFallback }.count
+        let strictEmailBlankSuppressed = strictEmailCandidates.isEmpty
         let strictStaffCandidates = strictCandidates.filter { $0.category == .staffSignature }
-        let strictStaffLabelVisible = !staffRows.isEmpty
-        let strictStaffCandidateExistsIfVisible = !strictStaffLabelVisible || !strictStaffCandidates.isEmpty
+        let strictStaffFieldHasVisibleContent = staffRows.contains { row in
+            fallbackRegionHasVisibleContent(
+                category: .staffSignature,
+                labelRule: nil,
+                labelItem: nil,
+                labelBox: row.labelBox,
+                fallbackBox: likelyStaffSignatureFillArea(toRightOf: row.labelBox),
+                textItems: textItems,
+                excluding: [],
+                context: OCRProcessingContext(sourceImage: sourceImage)
+            )
+        }
+        let strictStaffCandidateExistsIfVisible = !strictStaffFieldHasVisibleContent || !strictStaffCandidates.isEmpty
         let strictStaffCandidateIndependent = strictStaffCandidates.allSatisfy {
             $0.displayTitle != OCRCandidateCategory.name.displayTitle
                 && $0.category == .staffSignature
         }
-        let strictStaffRegionCoversSignatureArea = !strictStaffLabelVisible || strictStaffCandidates.contains { candidate in
+        let strictStaffRegionCoversSignatureArea = !strictStaffFieldHasVisibleContent || strictStaffCandidates.contains { candidate in
             staffRows.contains { row in
                 privateOCRRegressionRect(candidate.boundingBox, reachesRow: row.rowBox)
                     || candidate.labelBoundingBox.map { privateOCRRegressionRect($0, reachesRow: row.labelBox) } == true
@@ -5796,8 +6089,8 @@ struct DefaultOCRService: OCRService {
                 passed: !strictTesterNameContaminationDetected
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict private email fallback deduplicated",
-                passed: !strictDuplicateEmailFallbackDetected
+                name: "Strict private empty email suppressed",
+                passed: strictEmailBlankSuppressed && !strictDuplicateEmailFallbackDetected
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Strict Case 11 private staff candidate exists if label visible",
@@ -5868,6 +6161,11 @@ struct DefaultOCRService: OCRService {
             strictBirthdayPresent: strictBirthdayValueDetected,
             strictExamDatePresent: strictExamDatePresent,
             strictPhoneValueExtraction: strictPhoneValueExtracted,
+            strictEmailBlankSuppressed: strictEmailBlankSuppressed,
+            strictEmailCandidateCount: strictEmailCandidates.count,
+            strictEmailFallbackCount: strictEmailFallbackCount,
+            strictStaffCandidateIfVisible: strictStaffCandidateExistsIfVisible,
+            strictStaffNotMergedIntoName: strictStaffNotMergedIntoPatientName,
             standardRegressionStillPassing: standardRegressionStillPassing,
             totalCandidateCount: candidates.count,
             candidateSummaries: candidates.map(privateOCRRegressionCandidateSummary),
@@ -5910,6 +6208,53 @@ struct DefaultOCRService: OCRService {
                 labelBox: item.boundingBox,
                 rowBox: rowBox,
                 normalizedValue: valueText.map(normalizedOCRLabelText)
+            )
+        }
+    }
+
+    private static func privateOCRRegressionStaffRows(
+        in textItems: [OCRTextItem]
+    ) -> [PrivateOCRRegressionRowFact] {
+        guard let staffLabelRule = labelRules.first(where: { $0.category == .staffSignature }) else {
+            return []
+        }
+
+        return textItems.enumerated().compactMap { index, item in
+            guard let observedLabel = observedLabel(for: staffLabelRule, in: item) else {
+                return nil
+            }
+
+            let fallbackBox = staffSignatureFallbackBox(
+                toRightOf: observedLabel.boundingBox,
+                labelRule: staffLabelRule,
+                labelItem: item,
+                textItems: textItems,
+                excluding: [index]
+            )
+            let inlineValue = staffSignatureInlineValueRange(
+                labelRule: staffLabelRule,
+                in: item.text
+            ).flatMap { range -> String? in
+                staffSignatureDisplayValue(
+                    from: (item.text as NSString)
+                        .substring(with: range)
+                )
+            }
+            let valueItem = nearestValueItem(
+                for: observedLabel.boundingBox,
+                category: .staffSignature,
+                in: textItems,
+                excluding: [index],
+                mode: .sameLineRight
+            )
+            let normalizedValue = (inlineValue ?? valueItem.flatMap { staffSignatureDisplayValue(from: $0.text) })
+                .map(normalizedOCRLabelText)
+            let rowBox = unionRect(observedLabel.boundingBox, fallbackBox)
+
+            return PrivateOCRRegressionRowFact(
+                labelBox: observedLabel.boundingBox,
+                rowBox: rowBox,
+                normalizedValue: normalizedValue
             )
         }
     }
@@ -6376,6 +6721,57 @@ private struct OCRLabelTextMatch {
     let range: NSRange
 }
 
+private func fuzzyStaffSignatureLabelTextMatch(in text: String) -> OCRLabelTextMatch? {
+    let compact = normalizedOCRLabelText(text)
+    guard !compact.isEmpty else {
+        return nil
+    }
+
+    let exclusions = [
+        "测试日期",
+        "测试时间",
+        "检查日期",
+        "检查时间",
+        "检查名称",
+        "检查项目",
+        "项目名称",
+        "使用协议名称",
+        "医院名称",
+        "报告单",
+        "检查报告",
+        "检验报告",
+        "threshold",
+        "abr"
+    ]
+    if exclusions.contains(where: { compact.contains(normalizedOCRLabelText($0)) }) {
+        return nil
+    }
+
+    let fuzzyLabels: [(needle: String, title: String)] = [
+        ("测试", "测试者"),
+        ("签", "签名")
+    ]
+    for fuzzyLabel in fuzzyLabels {
+        let normalizedNeedle = normalizedOCRLabelText(fuzzyLabel.needle)
+        guard compact == normalizedNeedle
+            || (compact.hasPrefix(normalizedNeedle) && compact.count <= normalizedNeedle.count + 2) else {
+            continue
+        }
+
+        let nsText = text as NSString
+        let fullRange = NSRange(location: 0, length: nsText.length)
+        let range = nsText.range(of: fuzzyLabel.needle, options: [.caseInsensitive], range: fullRange)
+        return OCRLabelTextMatch(
+            title: fuzzyLabel.title,
+            range: range.location == NSNotFound
+                ? NSRange(location: 0, length: min((fuzzyLabel.needle as NSString).length, nsText.length))
+                : range
+        )
+    }
+
+    return nil
+}
+
 private struct OCRPhoneValueMatch {
     let value: String
     let range: NSRange
@@ -6508,6 +6904,11 @@ private struct OCRLabelRule {
     func matches(_ text: String) -> Bool {
         if category == .name, isForbiddenNameLabelText(text) {
             return false
+        }
+
+        if category == .staffSignature,
+           fuzzyStaffSignatureLabelTextMatch(in: text) != nil {
+            return true
         }
 
         let normalized = normalizedOCRLabelText(text)
