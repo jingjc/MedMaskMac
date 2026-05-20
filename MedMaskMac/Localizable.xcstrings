@@ -1333,6 +1333,23 @@
         }
       }
     },
+    "ocr.category.staff_signature" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Staff / Signature"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工作人员/签名"
+          }
+        }
+      }
+    },
     "ocr.category.document_number" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1635,6 +1652,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "医生"
+          }
+        }
+      }
+    },
+    "preset.custom.field.staff_signature" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Staff / Signature"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工作人员/签名"
           }
         }
       }
@@ -2485,6 +2519,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未识别到具体内容，建议检查该填写区域"
+          }
+        }
+      }
+    },
+    "review.ocr.value.region_only" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text was not recognized reliably. Please review the masking area."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能可靠识别文字，请复核遮盖范围"
+          }
+        }
+      }
+    },
+    "review.ocr.value.uncertain" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Possible: %@. Please review."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可能：%@，请复核"
           }
         }
       }

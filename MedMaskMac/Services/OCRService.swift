@@ -2214,6 +2214,18 @@ struct DefaultOCRService: OCRService {
             return nil
         }
 
+        if labelRule.category == .staffSignature {
+            return staffSignatureCandidate(
+                labelRule: labelRule,
+                labelItem: labelItem,
+                labelIndex: labelIndex,
+                observedLabel: observedLabel,
+                textItems: textItems,
+                pageID: pageID,
+                options: options
+            )
+        }
+
         if let inlineValue = inlineValueCandidate(
             labelRule: labelRule,
             labelItem: labelItem,
@@ -2349,6 +2361,202 @@ struct DefaultOCRService: OCRService {
             labelBoundingBox: observedLabel.boundingBox,
             detectionKind: .labelFallback
         )
+    }
+
+    private static func staffSignatureCandidate(
+        labelRule: OCRLabelRule,
+        labelItem: OCRTextItem,
+        labelIndex: Int,
+        observedLabel: OCRObservedLabel,
+        textItems: [OCRTextItem],
+        pageID: PageItem.ID,
+        options: OCRDetectionOptions
+    ) -> OCRSensitiveCandidate? {
+        let labelTitle = sourceLabelText(
+            observedLabel.title,
+            for: labelRule.category,
+            options: options
+        )
+
+        if let valueRange = staffSignatureInlineValueRange(
+            labelRule: labelRule,
+            in: labelItem.text
+        ),
+           let valueBox = appNormalizedRect(
+               for: valueRange,
+               in: labelItem.recognizedText,
+               text: labelItem.text,
+               fallbackBounds: labelItem.boundingBox
+           ) {
+            let rawValue = (labelItem.text as NSString)
+                .substring(with: valueRange)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return staffSignatureCandidate(
+                rawValue: rawValue,
+                valueBox: valueBox,
+                confidence: labelItem.confidence,
+                labelTitle: labelTitle,
+                labelBox: observedLabel.boundingBox,
+                pageID: pageID
+            )
+        }
+
+        if let valueItem = nearestValueItem(
+            for: observedLabel.boundingBox,
+            category: .staffSignature,
+            in: textItems,
+            excluding: [labelIndex],
+            mode: .sameLineRight
+        ) {
+            return staffSignatureCandidate(
+                rawValue: valueItem.text,
+                valueBox: valueItem.boundingBox,
+                confidence: min(labelItem.confidence, valueItem.confidence),
+                labelTitle: labelTitle,
+                labelBox: observedLabel.boundingBox,
+                pageID: pageID
+            )
+        }
+
+        return OCRSensitiveCandidate(
+            pageID: pageID,
+            text: L10n.Review.ocrNoExplicitValue,
+            category: .staffSignature,
+            valueState: .regionOnly,
+            sourceLabelText: labelTitle,
+            confidence: labelItem.confidence,
+            boundingBox: staffSignatureFallbackBox(
+                toRightOf: observedLabel.boundingBox,
+                labelRule: labelRule,
+                labelItem: labelItem,
+                textItems: textItems,
+                excluding: [labelIndex]
+            ),
+            labelBoundingBox: observedLabel.boundingBox,
+            detectionKind: .labelFallback
+        )
+    }
+
+    private static func staffSignatureCandidate(
+        rawValue: String,
+        valueBox: NormalizedRect,
+        confidence: Double,
+        labelTitle: String?,
+        labelBox: NormalizedRect,
+        pageID: PageItem.ID
+    ) -> OCRSensitiveCandidate {
+        guard let value = staffSignatureDisplayValue(from: rawValue) else {
+            return OCRSensitiveCandidate(
+                pageID: pageID,
+                text: L10n.Review.ocrNoExplicitValue,
+                category: .staffSignature,
+                valueState: .regionOnly,
+                sourceLabelText: labelTitle,
+                confidence: confidence,
+                boundingBox: valueBox.padded(horizontal: 0.003, vertical: 0.004),
+                labelBoundingBox: labelBox,
+                detectionKind: .labelFallback
+            )
+        }
+
+        let valueState = staffSignatureValueState(confidence: confidence)
+        guard valueState != .regionOnly else {
+            return OCRSensitiveCandidate(
+                pageID: pageID,
+                text: L10n.Review.ocrNoExplicitValue,
+                category: .staffSignature,
+                valueState: .regionOnly,
+                sourceLabelText: labelTitle,
+                confidence: confidence,
+                boundingBox: valueBox.padded(horizontal: 0.003, vertical: 0.004),
+                labelBoundingBox: labelBox,
+                detectionKind: .labelFallback
+            )
+        }
+
+        return OCRSensitiveCandidate(
+            pageID: pageID,
+            text: value,
+            category: .staffSignature,
+            valueState: valueState,
+            sourceLabelText: labelTitle,
+            confidence: confidence,
+            boundingBox: valueBox.padded(horizontal: 0.003, vertical: 0.004),
+            labelBoundingBox: labelBox,
+            detectionKind: .labelValue
+        )
+    }
+
+    private static func staffSignatureValueState(confidence: Double) -> OCRCandidateValueState {
+        if confidence >= 0.80 {
+            return .valueRecognized
+        }
+
+        if confidence >= 0.55 {
+            return .valueUncertain
+        }
+
+        return .regionOnly
+    }
+
+    private static func staffSignatureFallbackBox(
+        toRightOf labelBox: NormalizedRect,
+        labelRule: OCRLabelRule,
+        labelItem: OCRTextItem,
+        textItems: [OCRTextItem],
+        excluding excludedIndexes: Set<Int>
+    ) -> NormalizedRect {
+        var fallbackBox = likelyStaffSignatureFillArea(toRightOf: labelBox)
+
+        if let inlineValueRange = staffSignatureInlineValueRange(
+            labelRule: labelRule,
+            in: labelItem.text
+        ),
+           let inlineValueBox = appNormalizedRect(
+               for: inlineValueRange,
+               in: labelItem.recognizedText,
+               text: labelItem.text,
+               fallbackBounds: labelItem.boundingBox
+           ) {
+            fallbackBox = unionRect(fallbackBox, inlineValueBox)
+        }
+
+        for (index, item) in textItems.enumerated() {
+            guard !excludedIndexes.contains(index),
+                  staffSignatureValueBox(item.boundingBox, isSameRowRightOf: labelBox) else {
+                continue
+            }
+
+            fallbackBox = unionRect(fallbackBox, item.boundingBox)
+        }
+
+        return fallbackBox.clamped()
+    }
+
+    private static func staffSignatureInlineValueRange(
+        labelRule: OCRLabelRule,
+        in text: String
+    ) -> NSRange? {
+        let nsText = text as NSString
+        let fullRange = NSRange(location: 0, length: nsText.length)
+
+        for pattern in labelRule.labelPatterns.sorted(by: { $0.count > $1.count }) {
+            let escapedPattern = NSRegularExpression.escapedPattern(for: pattern)
+            let regex = try! NSRegularExpression(
+                pattern: "\(escapedPattern)\\s*[:：]?\\s*([^\\s:：]{1,80})",
+                options: [.caseInsensitive]
+            )
+
+            guard let match = regex.firstMatch(in: text, range: fullRange),
+                  match.range(at: 1).location != NSNotFound,
+                  match.range(at: 1).length > 0 else {
+                continue
+            }
+
+            return match.range(at: 1)
+        }
+
+        return nil
     }
 
     private static func birthdayFromNearbyIDValueCandidate(
@@ -2666,6 +2874,35 @@ struct DefaultOCRService: OCRService {
             height: height
         )
         .clamped()
+    }
+
+    private static func likelyStaffSignatureFillArea(toRightOf labelBox: NormalizedRect) -> NormalizedRect {
+        let gap = 0.014
+        let x = min(labelBox.maxX + gap, 0.94)
+        let width = min(max(0.24, labelBox.width * 3.2), 0.52, 0.98 - x)
+        let height = min(max(labelBox.height * 1.55, 0.034), 0.080)
+        let y = max(labelBox.centerY - height / 2, 0)
+
+        return NormalizedRect(
+            x: x,
+            y: y,
+            width: width,
+            height: height
+        )
+        .clamped()
+    }
+
+    private static func staffSignatureValueBox(
+        _ valueBox: NormalizedRect,
+        isSameRowRightOf labelBox: NormalizedRect
+    ) -> Bool {
+        let verticalCenterDelta = abs(valueBox.centerY - labelBox.centerY)
+        let rightGap = valueBox.x - labelBox.maxX
+
+        return rightGap >= -0.015
+            && rightGap <= 0.52
+            && verticalCenterDelta <= max(labelBox.height, valueBox.height) * 1.05
+            && valueBox.maxX <= min(labelBox.maxX + 0.70, 1)
     }
 
     private static func likelySplitNameFillArea(for group: OCRSplitNameLabelGroup) -> NormalizedRect {
@@ -3199,8 +3436,14 @@ struct DefaultOCRService: OCRService {
     }
 
     private static func isValidCandidateForFinalOutput(_ candidate: OCRSensitiveCandidate) -> Bool {
+        if candidate.valueState == .regionOnly {
+            return candidate.detectionKind == .labelFallback
+                && candidate.boundingBox.width > 0
+                && candidate.boundingBox.height > 0
+        }
+
         if candidate.detectionKind == .labelFallback {
-            return candidate.text == L10n.Review.ocrNoExplicitValue
+            return false
         }
 
         if candidate.category == .phone,
@@ -4236,6 +4479,8 @@ struct DefaultOCRService: OCRService {
             return normalized.count >= 1 && normalized.count <= 30
         case .doctor:
             return normalized.count >= 1 && normalized.count <= 20
+        case .staffSignature:
+            return staffSignatureDisplayValue(from: text) != nil
         case .bedNumber:
             return normalized.count >= 1 && normalized.count <= 16
         case .custom, .unknown:
@@ -4299,6 +4544,16 @@ struct DefaultOCRService: OCRService {
         }
 
         return likelyHumanNameDisplayValueFromRawValue(text)
+    }
+
+    private static func staffSignatureDisplayValue(from text: String) -> String? {
+        guard let value = likelyHumanNameDisplayValueFromRawValue(text),
+              !isStandardForbiddenNameLabelText(value),
+              !containsForbiddenStaffSignatureValueText(value) else {
+            return nil
+        }
+
+        return value
     }
 
     private static func likelyHumanNameDisplayValueFromRawValue(_ text: String) -> String? {
@@ -4419,6 +4674,18 @@ struct DefaultOCRService: OCRService {
         return splitNamePartForbiddenTexts.contains { forbiddenText in
             let forbidden = normalizedOCRLabelText(forbiddenText)
             return !forbidden.isEmpty && compact.contains(forbidden)
+        }
+    }
+
+    private static func containsForbiddenStaffSignatureValueText(_ text: String) -> Bool {
+        let compact = normalizedOCRLabelText(text)
+        guard !compact.isEmpty else {
+            return false
+        }
+
+        return staffSignatureForbiddenValueTexts.contains { forbiddenText in
+            let forbidden = normalizedOCRLabelText(forbiddenText)
+            return !forbidden.isEmpty && (compact == forbidden || compact.hasPrefix(forbidden) || compact.contains(forbidden))
         }
     }
 
@@ -4738,6 +5005,72 @@ struct DefaultOCRService: OCRService {
                 privateOCRRegressionTextItem("名:", box: givenNameLabelBox)
             ]
         )
+        let staffCase1 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试者：张三", box: NormalizedRect(x: 0.10, y: 0.34, width: 0.180, height: 0.020), confidence: 0.92)
+            ]
+        )
+        let staffCase2 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试者：张三", box: NormalizedRect(x: 0.10, y: 0.34, width: 0.180, height: 0.020), confidence: 0.66)
+            ]
+        )
+        let staffCase3 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试者：□□", box: NormalizedRect(x: 0.10, y: 0.34, width: 0.180, height: 0.020), confidence: 0.42)
+            ]
+        )
+        let staffCase4 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("姓:", box: surnameLabelBox),
+                privateOCRRegressionTextItem("王", box: NormalizedRect(x: 0.18, y: 0.10, width: 0.026, height: 0.018)),
+                privateOCRRegressionTextItem("名:", box: givenNameLabelBox),
+                privateOCRRegressionTextItem("小明", box: NormalizedRect(x: 0.18, y: 0.14, width: 0.052, height: 0.018)),
+                privateOCRRegressionTextItem("测试者：张三", box: NormalizedRect(x: 0.10, y: 0.24, width: 0.180, height: 0.020), confidence: 0.92)
+            ]
+        )
+        let staffCase5 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("报告医生：李四", box: NormalizedRect(x: 0.10, y: 0.34, width: 0.200, height: 0.020), confidence: 0.92)
+            ]
+        )
+        let staffCase6 = privateOCRRegressionStandardCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试者：张三", box: NormalizedRect(x: 0.10, y: 0.34, width: 0.180, height: 0.020), confidence: 0.92)
+            ]
+        )
+        let staffCase7 = privateOCRRegressionCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试者：张三", box: NormalizedRect(x: 0.10, y: 0.34, width: 0.180, height: 0.020), confidence: 0.92)
+            ],
+            options: OCRDetectionOptions(preset: .custom, customFields: [.name])
+        )
+        let staffCase8 = privateOCRRegressionCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试者：张三", box: NormalizedRect(x: 0.10, y: 0.34, width: 0.180, height: 0.020), confidence: 0.92)
+            ],
+            options: OCRDetectionOptions(preset: .custom, customFields: [.staffSignature])
+        )
+        let staffCase9 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试者：罕见字姓名", box: NormalizedRect(x: 0.10, y: 0.34, width: 0.250, height: 0.020), confidence: 0.92)
+            ]
+        )
+        let staffCase10 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试者：30岁", box: NormalizedRect(x: 0.10, y: 0.34, width: 0.180, height: 0.020), confidence: 0.92)
+            ]
+        )
         let strictDuplicateHospitalCase = finalizedCandidates(
             [
                 OCRSensitiveCandidate(
@@ -4914,6 +5247,92 @@ struct DefaultOCRService: OCRService {
             PrivateOCRRegressionCheckResult(
                 name: "Strict Case 5 report title is not hospital",
                 passed: strictHospitalHeaderCase5.filter { $0.category == .hospital }.isEmpty
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Staff Case 1 clear tester value",
+                passed: privateOCRRegressionHasStaff(
+                    staffCase1,
+                    title: "测试者",
+                    text: "张三",
+                    valueState: .valueRecognized
+                )
+                    && staffCase1.filter { $0.category == .name }.isEmpty
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Staff Case 2 uncertain tester value",
+                passed: privateOCRRegressionHasStaff(
+                    staffCase2,
+                    title: "测试者",
+                    text: "张三",
+                    valueState: .valueUncertain
+                )
+                    && staffCase2.contains {
+                        $0.category == .staffSignature
+                            && $0.displayValueText.contains("张三")
+                    }
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Staff Case 3 unreadable tester region",
+                passed: privateOCRRegressionHasStaffRegionOnly(staffCase3, title: "测试者")
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Staff Case 4 split patient name plus tester",
+                passed: privateOCRRegressionHasSingleName(staffCase4, equalTo: "王小明")
+                    && privateOCRRegressionHasStaff(
+                        staffCase4,
+                        title: "测试者",
+                        text: "张三",
+                        valueState: .valueRecognized
+                    )
+                    && !privateOCRRegressionHasName(staffCase4, equalTo: "王小明张三")
+                    && !privateOCRRegressionHasName(staffCase4, equalTo: "张三")
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Staff Case 5 report doctor value",
+                passed: privateOCRRegressionHasStaff(
+                    staffCase5,
+                    title: "报告医生",
+                    text: "李四",
+                    valueState: .valueRecognized
+                )
+                    && staffCase5.filter { $0.category == .name }.isEmpty
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Staff Case 6 standard excludes tester",
+                passed: staffCase6.isEmpty
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Staff Case 7 custom disabled",
+                passed: staffCase7.filter { $0.category == .staffSignature }.isEmpty
+                    && staffCase7.filter { $0.category == .name }.isEmpty
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Staff Case 8 custom enabled",
+                passed: privateOCRRegressionHasStaff(
+                    staffCase8,
+                    title: "测试者",
+                    text: "张三",
+                    valueState: .valueRecognized
+                )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Staff Case 9 rare name is not dictionary gated",
+                passed: privateOCRRegressionHasStaff(
+                    staffCase9,
+                    title: "测试者",
+                    text: "罕见字姓名",
+                    valueState: .valueRecognized
+                )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Staff Case 10 invalid staff value becomes region only",
+                passed: privateOCRRegressionHasStaffRegionOnly(staffCase10, title: "测试者")
+                    && !privateOCRRegressionHasStaff(
+                        staffCase10,
+                        title: "测试者",
+                        text: "30岁",
+                        valueState: .valueRecognized
+                    )
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Case 2 phone label with value",
@@ -5143,6 +5562,10 @@ struct DefaultOCRService: OCRService {
             matching: ["电子邮件", "邮箱", "Email", "E-mail"],
             in: textItems
         )
+        let staffRows = privateOCRRegressionRows(
+            matching: staffSignatureLabelPatterns,
+            in: textItems
+        )
         let splitNameGroups = splitNameLabelGroups(in: textItems)
         let pairedSplitNameGroups = splitNameGroups
             .filter { $0.givenNameBoundingBox != nil }
@@ -5239,6 +5662,32 @@ struct DefaultOCRService: OCRService {
         let strictDuplicateEmailFallbackDetected = strictCandidates
             .filter { $0.category == .email && $0.detectionKind == .labelFallback }
             .count > 1
+        let strictStaffCandidates = strictCandidates.filter { $0.category == .staffSignature }
+        let strictStaffLabelVisible = !staffRows.isEmpty
+        let strictStaffCandidateExistsIfVisible = !strictStaffLabelVisible || !strictStaffCandidates.isEmpty
+        let strictStaffCandidateIndependent = strictStaffCandidates.allSatisfy {
+            $0.displayTitle != OCRCandidateCategory.name.displayTitle
+                && $0.category == .staffSignature
+        }
+        let strictStaffRegionCoversSignatureArea = !strictStaffLabelVisible || strictStaffCandidates.contains { candidate in
+            staffRows.contains { row in
+                privateOCRRegressionRect(candidate.boundingBox, reachesRow: row.rowBox)
+                    || candidate.labelBoundingBox.map { privateOCRRegressionRect($0, reachesRow: row.labelBox) } == true
+            }
+        }
+        let strictStaffValueStateValid = strictStaffCandidates.allSatisfy { candidate in
+            switch candidate.valueState {
+            case .valueRecognized, .valueUncertain:
+                return staffSignatureDisplayValue(from: candidate.text) != nil
+            case .regionOnly:
+                return candidate.displayValueText == L10n.Review.ocrRegionOnlyValue
+            }
+        }
+        let strictStaffNotMergedIntoPatientName = !strictCandidates
+            .filter { $0.category == .name }
+            .contains { candidate in
+                privateOCRRegressionCandidate(candidate, isContaminatedBy: staffRows)
+            }
         let strictHospitalCandidates = strictCandidates.filter { $0.category == .hospital }
         let strictHospitalCandidateDetected = !strictHospitalCandidates.isEmpty
         let strictHospitalSingleCandidate = strictHospitalCandidates.count == 1
@@ -5349,6 +5798,22 @@ struct DefaultOCRService: OCRService {
             PrivateOCRRegressionCheckResult(
                 name: "Strict private email fallback deduplicated",
                 passed: !strictDuplicateEmailFallbackDetected
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 11 private staff candidate exists if label visible",
+                passed: strictStaffCandidateExistsIfVisible
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 11 private staff candidate independent",
+                passed: strictStaffCandidateIndependent && strictStaffNotMergedIntoPatientName
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 11 private staff region covers signature area",
+                passed: strictStaffRegionCoversSignatureArea
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 11 private staff value state valid",
+                passed: strictStaffValueStateValid
             ),
             PrivateOCRRegressionCheckResult(name: "Case A exactly one patient name candidate", passed: exactlyOneNameCandidate),
             PrivateOCRRegressionCheckResult(name: "Case A no duplicate name candidates", passed: !duplicateNameCandidatesDetected),
@@ -5660,6 +6125,8 @@ struct DefaultOCRService: OCRService {
         switch candidate.category {
         case .name:
             return candidate.detectionKind == .labelFallback ? "<REGION_FALLBACK>" : "<REDACTED_NAME>"
+        case .staffSignature:
+            return candidate.valueState == .regionOnly ? "<REGION_FALLBACK>" : "<REDACTED_STAFF_NAME>"
         case .phone:
             return candidate.detectionKind == .labelFallback ? "<REGION_FALLBACK>" : "<REDACTED_PHONE>"
         case .chineseID, .documentNumber:
@@ -5671,20 +6138,33 @@ struct DefaultOCRService: OCRService {
 
     private static func privateOCRRegressionTextItem(
         _ text: String,
-        box: NormalizedRect
+        box: NormalizedRect,
+        confidence: Double = 0.90
     ) -> OCRTextItem {
-        OCRTextItem(text: text, recognizedText: nil, boundingBox: box, confidence: 0.90)
+        OCRTextItem(text: text, recognizedText: nil, boundingBox: box, confidence: confidence)
+    }
+
+    private static func privateOCRRegressionCandidates(
+        pageID: PageItem.ID,
+        textItems: [OCRTextItem],
+        options: OCRDetectionOptions
+    ) -> [OCRSensitiveCandidate] {
+        buildCandidates(
+            from: textItems,
+            pageID: pageID,
+            options: options,
+            context: .empty
+        )
     }
 
     private static func privateOCRRegressionStandardCandidates(
         pageID: PageItem.ID,
         textItems: [OCRTextItem]
     ) -> [OCRSensitiveCandidate] {
-        buildCandidates(
-            from: textItems,
+        privateOCRRegressionCandidates(
             pageID: pageID,
-            options: OCRDetectionOptions(preset: .standard, customFields: []),
-            context: .empty
+            textItems: textItems,
+            options: OCRDetectionOptions(preset: .standard, customFields: [])
         )
     }
 
@@ -5692,11 +6172,10 @@ struct DefaultOCRService: OCRService {
         pageID: PageItem.ID,
         textItems: [OCRTextItem]
     ) -> [OCRSensitiveCandidate] {
-        buildCandidates(
-            from: textItems,
+        privateOCRRegressionCandidates(
             pageID: pageID,
-            options: OCRDetectionOptions(preset: .strict, customFields: []),
-            context: .empty
+            textItems: textItems,
+            options: OCRDetectionOptions(preset: .strict, customFields: [])
         )
     }
 
@@ -5755,6 +6234,32 @@ struct DefaultOCRService: OCRService {
     ) -> Bool {
         candidates.contains {
             $0.category == .hospital && $0.text.contains(text)
+        }
+    }
+
+    private static func privateOCRRegressionHasStaff(
+        _ candidates: [OCRSensitiveCandidate],
+        title expectedTitle: String,
+        text expectedText: String,
+        valueState expectedValueState: OCRCandidateValueState
+    ) -> Bool {
+        candidates.contains {
+            $0.category == .staffSignature
+                && $0.displayTitle == expectedTitle
+                && $0.text == expectedText
+                && $0.valueState == expectedValueState
+        }
+    }
+
+    private static func privateOCRRegressionHasStaffRegionOnly(
+        _ candidates: [OCRSensitiveCandidate],
+        title expectedTitle: String
+    ) -> Bool {
+        candidates.contains {
+            $0.category == .staffSignature
+                && $0.displayTitle == expectedTitle
+                && $0.valueState == .regionOnly
+                && $0.displayValueText == L10n.Review.ocrRegionOnlyValue
         }
     }
 
@@ -6103,7 +6608,7 @@ private let targetRules: [OCRTargetRule] = [
     ),
     OCRTargetRule(
         category: .name,
-        pattern: #"(?:患者姓名|病人姓名|受检者|受检人|测试者|被检者|姓名|名字|Name|Patient\s*Name|Subject\s*Name)\s*[:：]?\s*([一-龥·]{2,4})(?=\s|性别|年龄|科室|床号|门诊号|住院号|病案号|样本号|检验号|报告单号|条码号|$)"#,
+        pattern: #"(?:患者姓名|病人姓名|受检者|受检人|被检者|姓名|名字|Name|Patient\s*Name|Subject\s*Name)\s*[:：]?\s*([一-龥·]{2,4})(?=\s|性别|年龄|科室|床号|门诊号|住院号|病案号|样本号|检验号|报告单号|条码号|$)"#,
         captureGroup: 1
     )
 ]
@@ -6115,7 +6620,6 @@ private let nameLabelPatterns: [String] = [
     "病人姓名",
     "受检者",
     "受检人",
-    "测试者",
     "被检者",
     "姓 名",
     "姓：",
@@ -6137,21 +6641,37 @@ private let forbiddenNameLabelTexts: [String] = [
     "名称"
 ]
 
-private let standardNonPatientNameLabelTexts: [String] = [
+private let staffSignatureLabelPatterns: [String] = [
     "测试者",
     "测试人员",
     "检查者",
+    "检查人员",
     "操作者",
     "操作员",
+    "技师",
     "医生",
     "医师",
-    "技师",
     "审核者",
     "审核医生",
     "报告医生",
     "送检医生",
-    "申请医生"
+    "申请医生",
+    "签名",
+    "签字",
+    "记录者",
+    "填表人",
+    "Tester",
+    "Operator",
+    "Technician",
+    "Doctor",
+    "Physician",
+    "Reviewer",
+    "Reviewed by",
+    "Reported by",
+    "Signed by"
 ]
+
+private let standardNonPatientNameLabelTexts: [String] = staffSignatureLabelPatterns
 
 private let forbiddenNameValueTexts: [String] = forbiddenNameLabelTexts + [
     "地址",
@@ -6179,6 +6699,27 @@ private let splitNamePartForbiddenTexts: [String] = forbiddenNameValueTexts + [
     "M",
     "F",
     "Age 30"
+]
+
+private let staffSignatureForbiddenValueTexts: [String] = forbiddenNameValueTexts + [
+    "电话",
+    "手机号",
+    "手机",
+    "身份证号",
+    "身份证号码",
+    "电子邮件",
+    "男",
+    "女",
+    "M",
+    "F",
+    "Age 30",
+    "报告单",
+    "检查报告",
+    "检验报告",
+    "医院名称",
+    "项目名称",
+    "检查名称",
+    "文件名称"
 ]
 
 private let phoneLabelPatterns: [String] = [
@@ -6428,7 +6969,7 @@ private let labelRules: [OCRLabelRule] = [
     OCRLabelRule(category: .email, labelPatterns: ["电子邮件", "邮箱", "Email", "E-mail"]),
     OCRLabelRule(category: .hospital, labelPatterns: ["医院名称", "医院", "医疗机构", "机构名称"]),
     OCRLabelRule(category: .department, labelPatterns: ["科室", "科别", "病区", "就诊科室", "申请科室", "检查科室"]),
-    OCRLabelRule(category: .doctor, labelPatterns: ["医生", "医师", "申请医生", "审核医生", "报告医生", "送检医生", "检查医生"]),
+    OCRLabelRule(category: .staffSignature, labelPatterns: staffSignatureLabelPatterns),
     OCRLabelRule(category: .bedNumber, labelPatterns: ["床号", "床位号", "病床号"])
 ]
 

@@ -463,7 +463,7 @@ private struct OCRCandidateRow: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            Text(candidate.text)
+            Text(candidate.displayValueText)
                 .font(.subheadline)
                 .lineLimit(1)
                 .truncationMode(.middle)

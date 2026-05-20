@@ -86,6 +86,7 @@ enum L10n {
         static let email = L10n.string("preset.custom.field.email", default: "Email")
         static let hospitalDepartment = L10n.string("preset.custom.field.hospital_department", default: "Hospital/Department")
         static let doctor = L10n.string("preset.custom.field.doctor", default: "Doctor")
+        static let staffSignature = L10n.string("preset.custom.field.staff_signature", default: "Staff / Signature")
     }
 
     enum Common {
@@ -187,6 +188,7 @@ enum L10n {
         static let ocrCandidateStatusIgnored = L10n.string("review.ocr.status.ignored", default: "Ignored")
         static let ocrNoCandidates = L10n.string("review.ocr.no_candidates", default: "No sensitive items detected")
         static let ocrNoExplicitValue = L10n.string("review.ocr.no_explicit_value", default: "No specific content recognized. Please check this fill-in area.")
+        static let ocrRegionOnlyValue = L10n.string("review.ocr.value.region_only", default: "Text was not recognized reliably. Please review the masking area.")
         static let ocrStateIdle = L10n.string("review.ocr.state.idle", default: "Idle")
         static let ocrStateRunning = L10n.string("review.ocr.state.running", default: "Detecting current page...")
         static let ocrStateNeedsRerun = L10n.string("review.ocr.state.needs_rerun", default: "Detection settings changed. Rerun OCR for the current page.")
@@ -244,6 +246,10 @@ enum L10n {
         static func ocrStateFailed(_ reason: String) -> String {
             L10n.formatted("review.ocr.state.failed", default: "OCR failed: %@", reason)
         }
+
+        static func ocrUncertainValue(_ value: String) -> String {
+            L10n.formatted("review.ocr.value.uncertain", default: "Possible: %@. Please review.", value)
+        }
     }
 
     enum OCRCategory {
@@ -260,6 +266,7 @@ enum L10n {
         static let hospital = L10n.string("ocr.category.hospital", default: "Hospital")
         static let department = L10n.string("ocr.category.department", default: "Department")
         static let doctor = L10n.string("ocr.category.doctor", default: "Doctor")
+        static let staffSignature = L10n.string("ocr.category.staff_signature", default: "Staff / Signature")
         static let bedNumber = L10n.string("ocr.category.bed_number", default: "Bed Number")
         static let date = L10n.string("ocr.category.date", default: "Date")
         static let birthday = L10n.string("ocr.category.birthday", default: "Birthday")

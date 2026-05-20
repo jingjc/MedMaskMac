@@ -42,6 +42,7 @@ enum MaskCustomField: String, CaseIterable, Identifiable, Hashable {
     case email
     case hospitalDepartment
     case doctor
+    case staffSignature
 
     var id: Self { self }
 
@@ -69,6 +70,8 @@ enum MaskCustomField: String, CaseIterable, Identifiable, Hashable {
             L10n.CustomField.hospitalDepartment
         case .doctor:
             L10n.CustomField.doctor
+        case .staffSignature:
+            L10n.CustomField.staffSignature
         }
     }
 
@@ -96,6 +99,8 @@ enum MaskCustomField: String, CaseIterable, Identifiable, Hashable {
             [.hospital, .department]
         case .doctor:
             [.doctor]
+        case .staffSignature:
+            [.staffSignature]
         }
     }
 
@@ -144,6 +149,7 @@ struct OCRDetectionOptions: Equatable {
         .hospital,
         .department,
         .doctor,
+        .staffSignature,
         .bedNumber
     ])
 }

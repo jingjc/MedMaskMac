@@ -14,6 +14,7 @@ enum OCRCandidateCategory: String, CaseIterable, Hashable {
     case hospital
     case department
     case doctor
+    case staffSignature
     case bedNumber
     case date
     case birthday
@@ -49,6 +50,8 @@ enum OCRCandidateCategory: String, CaseIterable, Hashable {
             L10n.OCRCategory.department
         case .doctor:
             L10n.OCRCategory.doctor
+        case .staffSignature:
+            L10n.OCRCategory.staffSignature
         case .bedNumber:
             L10n.OCRCategory.bedNumber
         case .date:
@@ -74,7 +77,7 @@ enum OCRCandidateCategory: String, CaseIterable, Hashable {
             .chineseIDNumber
         case .medicalNumber:
             .medicalNumber
-        case .sex, .age, .address, .email, .fax, .documentNumber, .hospital, .department, .doctor, .bedNumber, .date, .birthday, .examDate, .custom, .unknown:
+        case .sex, .age, .address, .email, .fax, .documentNumber, .hospital, .department, .doctor, .staffSignature, .bedNumber, .date, .birthday, .examDate, .custom, .unknown:
             .custom
         }
     }
@@ -103,11 +106,18 @@ enum OCRCandidateDetectionKind: String, CaseIterable, Hashable {
     case labelFallback
 }
 
+enum OCRCandidateValueState: String, CaseIterable, Hashable {
+    case valueRecognized
+    case valueUncertain
+    case regionOnly
+}
+
 struct OCRSensitiveCandidate: Identifiable, Hashable {
     let id: UUID
     let pageID: PageItem.ID
     var text: String
     var category: OCRCandidateCategory
+    var valueState: OCRCandidateValueState
     var sourceLabelText: String?
     var confidence: Double?
     var boundingBox: NormalizedRect
@@ -122,6 +132,7 @@ struct OCRSensitiveCandidate: Identifiable, Hashable {
         pageID: PageItem.ID,
         text: String,
         category: OCRCandidateCategory,
+        valueState: OCRCandidateValueState? = nil,
         sourceLabelText: String? = nil,
         confidence: Double? = nil,
         boundingBox: NormalizedRect,
@@ -135,6 +146,7 @@ struct OCRSensitiveCandidate: Identifiable, Hashable {
         self.pageID = pageID
         self.text = text
         self.category = category
+        self.valueState = valueState ?? (detectionKind == .labelFallback ? .regionOnly : .valueRecognized)
         self.sourceLabelText = sourceLabelText
         self.confidence = confidence
         self.boundingBox = boundingBox
@@ -152,5 +164,16 @@ struct OCRSensitiveCandidate: Identifiable, Hashable {
         }
 
         return sourceLabelText
+    }
+
+    var displayValueText: String {
+        switch valueState {
+        case .valueRecognized:
+            text
+        case .valueUncertain:
+            L10n.Review.ocrUncertainValue(text)
+        case .regionOnly:
+            L10n.Review.ocrRegionOnlyValue
+        }
     }
 }
