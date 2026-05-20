@@ -63,8 +63,10 @@ struct PrivateOCRRegressionFixtureResult {
     let classification: PrivateOCRRegressionClassification
     let patientNameClassification: PrivateOCRRegressionClassification
     let phoneClassification: PrivateOCRRegressionClassification
+    let strictHospitalSingleCandidate: Bool
     let strictHospitalPassed: Bool
     let strictHospitalFullName: Bool
+    let strictHospitalNoAddressPollution: Bool
     let strictHospitalNotSuffixOnly: Bool
     let strictBirthdayPresent: Bool
     let strictExamDatePresent: Bool
@@ -285,7 +287,7 @@ struct DefaultOCRService: OCRService {
             to: &candidates
         )
 
-        return finalizedCandidates(candidates, includedCategories: includedCategories)
+        return finalizedCandidates(candidates, options: options)
     }
 
     private static func recognizedTextObservations(in cgImage: CGImage) throws -> [VNRecognizedTextObservation] {
@@ -1058,19 +1060,62 @@ struct DefaultOCRService: OCRService {
     }
 
     private static func isHospitalHeaderValue(_ text: String) -> Bool {
+        isCleanHospitalCandidateValue(text)
+    }
+
+    private static func isCleanHospitalCandidateValue(_ text: String) -> Bool {
         let normalized = normalizedOCRValueText(text)
-        guard normalized.count >= 4,
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let compact = normalizedOCRLabelText(normalized)
+        guard compact.count >= 4,
               !isTruncatedHospitalHeaderValue(normalized),
-              !reportTitlePatterns.contains(where: { normalized.localizedCaseInsensitiveContains($0) }) else {
+              hospitalValueHasHospitalSuffix(compact),
+              !hospitalValueContainsUnrelatedFieldLabel(compact),
+              !hospitalValueContainsReportTitle(compact),
+              !hospitalValueContainsDepartmentOnlyText(compact) else {
             return false
         }
 
-        return hospitalHeaderSuffixes.contains { normalized.hasSuffix($0) }
+        return true
     }
 
     private static func isTruncatedHospitalHeaderValue(_ text: String) -> Bool {
         let compact = normalizedOCRLabelText(text)
         return compact.hasPrefix("院附属")
+    }
+
+    private static func hospitalValueHasHospitalSuffix(_ compactText: String) -> Bool {
+        hospitalHeaderSuffixes.contains { suffix in
+            compactText.hasSuffix(normalizedOCRLabelText(suffix))
+        }
+    }
+
+    private static func hospitalValueContainsUnrelatedFieldLabel(_ compactText: String) -> Bool {
+        if hospitalPollutionPrefixPatterns.contains(where: { label in
+            let normalizedLabel = normalizedOCRLabelText(label)
+            return !normalizedLabel.isEmpty && compactText.hasPrefix(normalizedLabel)
+        }) {
+            return true
+        }
+
+        return hospitalPollutionLabelPatterns.contains { label in
+            let normalizedLabel = normalizedOCRLabelText(label)
+            return !normalizedLabel.isEmpty && compactText.contains(normalizedLabel)
+        }
+    }
+
+    private static func hospitalValueContainsReportTitle(_ compactText: String) -> Bool {
+        reportTitlePatterns.contains { pattern in
+            let normalizedPattern = normalizedOCRLabelText(pattern)
+            return !normalizedPattern.isEmpty && compactText.contains(normalizedPattern)
+        }
+    }
+
+    private static func hospitalValueContainsDepartmentOnlyText(_ compactText: String) -> Bool {
+        departmentHeaderSuffixes.contains { suffix in
+            let normalizedSuffix = normalizedOCRLabelText(suffix)
+            return normalizedSuffix.count > 1 && compactText.contains(normalizedSuffix)
+        }
     }
 
     private static func isDepartmentHeaderValue(_ text: String) -> Bool {
@@ -3134,8 +3179,9 @@ struct DefaultOCRService: OCRService {
 
     private static func finalizedCandidates(
         _ candidates: [OCRSensitiveCandidate],
-        includedCategories: Set<OCRCandidateCategory>
+        options: OCRDetectionOptions
     ) -> [OCRSensitiveCandidate] {
+        let includedCategories = options.includedCategories
         let presetScopedCandidates = candidates.filter { includedCategories.contains($0.category) }
         let validatedCandidates = presetScopedCandidates.filter { candidate in
             isValidCandidateForFinalOutput(candidate)
@@ -3144,7 +3190,12 @@ struct DefaultOCRService: OCRService {
         let revalidatedMergedCandidates = mergedCandidates.filter { candidate in
             isValidCandidateForFinalOutput(candidate)
         }
-        return deduplicatedCandidates(revalidatedMergedCandidates)
+        let deduplicated = deduplicatedCandidates(revalidatedMergedCandidates)
+        guard options.preset == .strict else {
+            return deduplicated
+        }
+
+        return deduplicatedStrictHospitalCandidates(deduplicated)
     }
 
     private static func isValidCandidateForFinalOutput(_ candidate: OCRSensitiveCandidate) -> Bool {
@@ -3720,6 +3771,34 @@ struct DefaultOCRService: OCRService {
         return deduplicated
     }
 
+    private static func deduplicatedStrictHospitalCandidates(
+        _ candidates: [OCRSensitiveCandidate]
+    ) -> [OCRSensitiveCandidate] {
+        var bestHospitalByPage: [PageItem.ID: OCRSensitiveCandidate] = [:]
+
+        for candidate in candidates where candidate.category == .hospital {
+            guard isCleanHospitalCandidateValue(candidate.text) else {
+                continue
+            }
+
+            if let existing = bestHospitalByPage[candidate.pageID] {
+                if isPreferredHospitalCandidate(candidate, over: existing) {
+                    bestHospitalByPage[candidate.pageID] = candidate
+                }
+            } else {
+                bestHospitalByPage[candidate.pageID] = candidate
+            }
+        }
+
+        return candidates.filter { candidate in
+            guard candidate.category == .hospital else {
+                return true
+            }
+
+            return bestHospitalByPage[candidate.pageID]?.id == candidate.id
+        }
+    }
+
     private static func areDuplicateCandidates(
         _ left: OCRSensitiveCandidate,
         _ right: OCRSensitiveCandidate
@@ -3791,6 +3870,23 @@ struct DefaultOCRService: OCRService {
         }
 
         return false
+    }
+
+    private static func isPreferredHospitalCandidate(
+        _ candidate: OCRSensitiveCandidate,
+        over existingCandidate: OCRSensitiveCandidate
+    ) -> Bool {
+        let candidateLength = normalizedOCRLabelText(candidate.text).count
+        let existingLength = normalizedOCRLabelText(existingCandidate.text).count
+        if candidateLength != existingLength {
+            return candidateLength > existingLength
+        }
+
+        if detectionRank(candidate.detectionKind) != detectionRank(existingCandidate.detectionKind) {
+            return detectionRank(candidate.detectionKind) < detectionRank(existingCandidate.detectionKind)
+        }
+
+        return (candidate.confidence ?? 0) > (existingCandidate.confidence ?? 0)
     }
 
     private static func candidateBoxesReferToSameLocation(
@@ -4135,7 +4231,7 @@ struct DefaultOCRService: OCRService {
         case .address:
             return normalized.count >= 2
         case .hospital:
-            return normalized.count >= 2
+            return isCleanHospitalCandidateValue(text)
         case .department:
             return normalized.count >= 1 && normalized.count <= 30
         case .doctor:
@@ -4642,6 +4738,25 @@ struct DefaultOCRService: OCRService {
                 privateOCRRegressionTextItem("名:", box: givenNameLabelBox)
             ]
         )
+        let strictDuplicateHospitalCase = finalizedCandidates(
+            [
+                OCRSensitiveCandidate(
+                    pageID: pageID,
+                    text: "地址；华中科技大学同济医学院附属协和医院",
+                    category: .hospital,
+                    confidence: 0.80,
+                    boundingBox: NormalizedRect(x: 0.02, y: 0.04, width: 0.620, height: 0.050)
+                ),
+                OCRSensitiveCandidate(
+                    pageID: pageID,
+                    text: "华中科技大学同济医学院附属协和医院",
+                    category: .hospital,
+                    confidence: 0.90,
+                    boundingBox: NormalizedRect(x: 0.08, y: 0.04, width: 0.365, height: 0.026)
+                )
+            ],
+            options: OCRDetectionOptions(preset: .strict, customFields: [])
+        )
         let strictHospitalHeaderCase1 = privateOCRRegressionStrictCandidates(
             pageID: pageID,
             textItems: [
@@ -4702,7 +4817,20 @@ struct DefaultOCRService: OCRService {
 
         return [
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 1 hospital full header line",
+                name: "Strict Case 1 duplicate polluted hospital candidate",
+                passed: strictDuplicateHospitalCase.filter { $0.category == .hospital }.count == 1
+                    && privateOCRRegressionHasCandidate(
+                        strictDuplicateHospitalCase,
+                        category: .hospital,
+                        text: "华中科技大学同济医学院附属协和医院"
+                    )
+                    && !privateOCRRegressionHasHospital(
+                        strictDuplicateHospitalCase,
+                        containing: "地址"
+                    )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 3 hospital full header line",
                 passed: privateOCRRegressionHasCandidate(
                     strictHospitalHeaderCase1,
                     category: .hospital,
@@ -4728,7 +4856,7 @@ struct DefaultOCRService: OCRService {
                     )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 2 split hospital OCR row",
+                name: "Extra strict split hospital OCR row",
                 passed: privateOCRRegressionHasCandidate(
                     strictHospitalHeaderCase2,
                     category: .hospital,
@@ -4750,7 +4878,7 @@ struct DefaultOCRService: OCRService {
                     )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 3 generic hospital header",
+                name: "Strict Case 4 generic hospital header",
                 passed: privateOCRRegressionHasCandidate(
                     strictHospitalHeaderCase3,
                     category: .hospital,
@@ -4767,7 +4895,7 @@ struct DefaultOCRService: OCRService {
                     )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 4 medical college hospital span",
+                name: "Extra strict medical college hospital span",
                 passed: privateOCRRegressionHasCandidate(
                     strictHospitalHeaderCase4,
                     category: .hospital,
@@ -5111,32 +5239,33 @@ struct DefaultOCRService: OCRService {
         let strictDuplicateEmailFallbackDetected = strictCandidates
             .filter { $0.category == .email && $0.detectionKind == .labelFallback }
             .count > 1
-        let strictHospitalCandidateDetected = strictCandidates.contains { $0.category == .hospital }
+        let strictHospitalCandidates = strictCandidates.filter { $0.category == .hospital }
+        let strictHospitalCandidateDetected = !strictHospitalCandidates.isEmpty
+        let strictHospitalSingleCandidate = strictHospitalCandidates.count == 1
         let expectedPrivateHospital = normalizedOCRLabelText("华中科技大学同济医学院附属协和医院")
-        let strictHospitalHeaderDetected = strictCandidates.contains {
-            $0.category == .hospital
-                && normalizedOCRLabelText($0.text) == expectedPrivateHospital
+        let strictHospitalHeaderDetected = strictHospitalCandidates.contains {
+            normalizedOCRLabelText($0.text) == expectedPrivateHospital
         }
-        let strictHospitalEndsWithExpectedSuffix = strictCandidates.contains {
-            $0.category == .hospital && normalizedOCRLabelText($0.text).hasSuffix("协和医院")
+        let strictHospitalEndsWithExpectedSuffix = strictHospitalCandidates.contains {
+            normalizedOCRLabelText($0.text).hasSuffix("协和医院")
         }
-        let strictBadHospitalHeaderDetected = strictCandidates.contains {
-            guard $0.category == .hospital else {
-                return false
-            }
-
+        let strictBadHospitalHeaderDetected = strictHospitalCandidates.contains {
             let normalizedHospital = normalizedOCRLabelText($0.text)
             return normalizedHospital.contains(normalizedOCRLabelText("耳鼻咽喉头颈外科"))
                 || normalizedHospital.contains(normalizedOCRLabelText("ABR报告单"))
         }
-        let strictTruncatedHospitalDetected = strictCandidates.contains {
-            $0.category == .hospital
-                && normalizedOCRLabelText($0.text) == normalizedOCRLabelText("院附属协和医院")
+        let strictHospitalAddressPollutionDetected = strictHospitalCandidates.contains {
+            hospitalValueContainsUnrelatedFieldLabel(normalizedOCRLabelText($0.text))
+        }
+        let strictTruncatedHospitalDetected = strictHospitalCandidates.contains {
+            normalizedOCRLabelText($0.text) == normalizedOCRLabelText("院附属协和医院")
         }
         let strictHospitalPassed = strictHospitalCandidateDetected
+            && strictHospitalSingleCandidate
             && strictHospitalHeaderDetected
             && strictHospitalEndsWithExpectedSuffix
             && !strictBadHospitalHeaderDetected
+            && !strictHospitalAddressPollutionDetected
             && !strictTruncatedHospitalDetected
         let birthdaySourcePresent = labelRules
             .first(where: { $0.category == .birthday })
@@ -5171,8 +5300,16 @@ struct DefaultOCRService: OCRService {
                 passed: strictHospitalCandidateDetected
             ),
             PrivateOCRRegressionCheckResult(
+                name: "Strict private hospital single candidate",
+                passed: strictHospitalSingleCandidate
+            ),
+            PrivateOCRRegressionCheckResult(
                 name: "Strict private hospital has expected suffix",
                 passed: strictHospitalEndsWithExpectedSuffix
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict private hospital has no address pollution",
+                passed: !strictHospitalAddressPollutionDetected
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Strict private hospital is not truncated suffix",
@@ -5182,6 +5319,7 @@ struct DefaultOCRService: OCRService {
                 name: "Strict Case 6 private hospital header split",
                 passed: strictHospitalHeaderDetected
                     && !strictBadHospitalHeaderDetected
+                    && !strictHospitalAddressPollutionDetected
                     && !strictTruncatedHospitalDetected
             ),
             PrivateOCRRegressionCheckResult(
@@ -5257,8 +5395,10 @@ struct DefaultOCRService: OCRService {
             classification: classification,
             patientNameClassification: patientNameClassification,
             phoneClassification: phoneClassification,
+            strictHospitalSingleCandidate: strictHospitalSingleCandidate,
             strictHospitalPassed: strictHospitalPassed,
             strictHospitalFullName: strictHospitalHeaderDetected,
+            strictHospitalNoAddressPollution: !strictHospitalAddressPollutionDetected,
             strictHospitalNotSuffixOnly: !strictTruncatedHospitalDetected && !strictBadHospitalHeaderDetected,
             strictBirthdayPresent: strictBirthdayValueDetected,
             strictExamDatePresent: strictExamDatePresent,
@@ -6102,6 +6242,48 @@ private let medicalNumberLabelPatterns: [String] = [
 
 private let knownHospitalHeaderNames: [String] = [
     "华中科技大学同济医学院附属协和医院"
+]
+
+private let hospitalPollutionPrefixPatterns: [String] = [
+    "地址",
+    "电话",
+    "手机",
+    "电子邮件",
+    "姓名",
+    "姓",
+    "名",
+    "性别",
+    "年龄",
+    "生日",
+    "测试日期",
+    "检查日期",
+    "身份证号",
+    "证件号",
+    "测试者",
+    "检查者",
+    "操作者",
+    "医生",
+    "技师"
+]
+
+private let hospitalPollutionLabelPatterns: [String] = [
+    "地址",
+    "电话",
+    "手机",
+    "电子邮件",
+    "姓名",
+    "性别",
+    "年龄",
+    "生日",
+    "测试日期",
+    "检查日期",
+    "身份证号",
+    "证件号",
+    "测试者",
+    "检查者",
+    "操作者",
+    "医生",
+    "技师"
 ]
 
 private let hospitalHeaderSuffixes: [String] = [
