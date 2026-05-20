@@ -63,6 +63,13 @@ struct PrivateOCRRegressionFixtureResult {
     let classification: PrivateOCRRegressionClassification
     let patientNameClassification: PrivateOCRRegressionClassification
     let phoneClassification: PrivateOCRRegressionClassification
+    let strictHospitalPassed: Bool
+    let strictHospitalFullName: Bool
+    let strictHospitalNotSuffixOnly: Bool
+    let strictBirthdayPresent: Bool
+    let strictExamDatePresent: Bool
+    let strictPhoneValueExtraction: Bool
+    let standardRegressionStillPassing: Bool
     let totalCandidateCount: Int
     let candidateSummaries: [PrivateOCRRegressionCandidateSummary]
     let splitNameGroupCount: Int
@@ -832,7 +839,7 @@ struct DefaultOCRService: OCRService {
             return nil
         }
 
-        var bestEnd: Int?
+        var ranges: [NSRange] = []
         for suffix in hospitalHeaderSuffixes {
             var searchRange = fullRange
             while searchRange.length > 0 {
@@ -841,7 +848,21 @@ struct DefaultOCRService: OCRService {
                     break
                 }
 
-                bestEnd = max(bestEnd ?? 0, rangeUpperBound(match))
+                let end = rangeUpperBound(match)
+                if let start = hospitalHeaderStart(in: text, endingAt: end),
+                   end > start,
+                   let range = trimmedHeaderComponentRange(
+                       in: text,
+                       range: NSRange(location: start, length: end - start)
+                   ) {
+                    let value = nsText.substring(with: range)
+                    if !value.contains(":"),
+                       !value.contains("："),
+                       isHospitalHeaderValue(value) {
+                        ranges.append(range)
+                    }
+                }
+
                 let nextLocation = match.location + 1
                 searchRange = NSRange(
                     location: nextLocation,
@@ -850,20 +871,19 @@ struct DefaultOCRService: OCRService {
             }
         }
 
-        guard let end = bestEnd,
-              let start = hospitalHeaderStart(in: text, endingAt: end),
-              end > start else {
-            return nil
-        }
+        return ranges
+            .sorted { left, right in
+                if left.length != right.length {
+                    return left.length > right.length
+                }
 
-        let range = NSRange(location: start, length: end - start)
-        let value = nsText.substring(with: range)
-        guard !value.contains(":"),
-              !value.contains("：") else {
-            return nil
-        }
+                if left.location != right.location {
+                    return left.location < right.location
+                }
 
-        return range
+                return rangeUpperBound(left) > rangeUpperBound(right)
+            }
+            .first
     }
 
     private static func knownHospitalHeaderRange(in text: String) -> NSRange? {
@@ -1040,11 +1060,17 @@ struct DefaultOCRService: OCRService {
     private static func isHospitalHeaderValue(_ text: String) -> Bool {
         let normalized = normalizedOCRValueText(text)
         guard normalized.count >= 4,
+              !isTruncatedHospitalHeaderValue(normalized),
               !reportTitlePatterns.contains(where: { normalized.localizedCaseInsensitiveContains($0) }) else {
             return false
         }
 
         return hospitalHeaderSuffixes.contains { normalized.hasSuffix($0) }
+    }
+
+    private static func isTruncatedHospitalHeaderValue(_ text: String) -> Bool {
+        let compact = normalizedOCRLabelText(text)
+        return compact.hasPrefix("院附属")
     }
 
     private static func isDepartmentHeaderValue(_ text: String) -> Bool {
@@ -4664,6 +4690,15 @@ struct DefaultOCRService: OCRService {
                 )
             ]
         )
+        let strictHospitalHeaderCase5 = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem(
+                    "耳鼻咽喉头颈外科 ABR报告单",
+                    box: NormalizedRect(x: 0.08, y: 0.04, width: 0.420, height: 0.026)
+                )
+            ]
+        )
 
         return [
             PrivateOCRRegressionCheckResult(
@@ -4747,6 +4782,10 @@ struct DefaultOCRService: OCRService {
                         strictHospitalHeaderCase4,
                         containing: "检验报告单"
                     )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 5 report title is not hospital",
+                passed: strictHospitalHeaderCase5.filter { $0.category == .hospital }.isEmpty
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Case 2 phone label with value",
@@ -5094,6 +5133,11 @@ struct DefaultOCRService: OCRService {
             $0.category == .hospital
                 && normalizedOCRLabelText($0.text) == normalizedOCRLabelText("院附属协和医院")
         }
+        let strictHospitalPassed = strictHospitalCandidateDetected
+            && strictHospitalHeaderDetected
+            && strictHospitalEndsWithExpectedSuffix
+            && !strictBadHospitalHeaderDetected
+            && !strictTruncatedHospitalDetected
         let birthdaySourcePresent = labelRules
             .first(where: { $0.category == .birthday })
             .map { birthdayRule in
@@ -5104,6 +5148,22 @@ struct DefaultOCRService: OCRService {
                 && $0.detectionKind != .labelFallback
                 && normalizedDateValue($0.text) != nil
         }
+        let strictExamDatePresent = strictExamDateCandidates.count == 1 && strictIncorrectDateCandidates.isEmpty
+        let standardRegressionStillPassing = exactlyOneNameCandidate
+            && !duplicateNameCandidatesDetected
+            && !testerOperatorContaminationDetected
+            && !(nameCandidate.map { privateOCRRegressionCandidate($0, isSourcedFrom: nonPatientRows) } ?? true)
+            && !nameFromForbiddenLabelDetected
+            && standardScopeClean
+            && idCandidateExistsIfPresent
+            && nameBoxCoversFillArea
+            && nameBoxExcludesTesterRows
+            && nameCandidateIsValueExtraction
+            && phoneTitlePreserved
+            && phoneValueExtracted
+            && phoneBoxSameRow
+            && phoneBoxAvoidsEmailRows
+            && !standardCandidateFromForbiddenRowsDetected
 
         let checks = [
             PrivateOCRRegressionCheckResult(
@@ -5134,7 +5194,7 @@ struct DefaultOCRService: OCRService {
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Strict Case 6 private test date is exam date only",
-                passed: strictExamDateCandidates.count == 1 && strictIncorrectDateCandidates.isEmpty
+                passed: strictExamDatePresent
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Strict private phone is value extraction",
@@ -5197,6 +5257,13 @@ struct DefaultOCRService: OCRService {
             classification: classification,
             patientNameClassification: patientNameClassification,
             phoneClassification: phoneClassification,
+            strictHospitalPassed: strictHospitalPassed,
+            strictHospitalFullName: strictHospitalHeaderDetected,
+            strictHospitalNotSuffixOnly: !strictTruncatedHospitalDetected && !strictBadHospitalHeaderDetected,
+            strictBirthdayPresent: strictBirthdayValueDetected,
+            strictExamDatePresent: strictExamDatePresent,
+            strictPhoneValueExtraction: strictPhoneValueExtracted,
+            standardRegressionStillPassing: standardRegressionStillPassing,
             totalCandidateCount: candidates.count,
             candidateSummaries: candidates.map(privateOCRRegressionCandidateSummary),
             splitNameGroupCount: splitNameGroups.count,
