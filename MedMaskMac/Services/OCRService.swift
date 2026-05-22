@@ -1752,7 +1752,7 @@ struct DefaultOCRService: OCRService {
 
             let escapedPattern = NSRegularExpression.escapedPattern(for: pattern)
             let regex = try! NSRegularExpression(
-                pattern: "\(escapedPattern)\\s*[:：;；]?",
+                pattern: "\(escapedPattern)\\s*[:：;；.。｡﹕∶︰﹔]?",
                 options: [.caseInsensitive]
             )
 
@@ -1805,7 +1805,7 @@ struct DefaultOCRService: OCRService {
 
             let escapedPattern = NSRegularExpression.escapedPattern(for: pattern)
             let regex = try! NSRegularExpression(
-                pattern: "\(escapedPattern)\\s*[:：;；]?",
+                pattern: "\(escapedPattern)\\s*[:：;；.。｡﹕∶︰﹔]?",
                 options: [.caseInsensitive]
             )
 
@@ -2579,7 +2579,7 @@ struct DefaultOCRService: OCRService {
         for pattern in labelRule.labelPatterns.sorted(by: { $0.count > $1.count }) {
             let escapedPattern = NSRegularExpression.escapedPattern(for: pattern)
             let regex = try! NSRegularExpression(
-                pattern: "\(escapedPattern)\\s*[:：]?\\s*([^\\s:：]{1,80})",
+                pattern: "\(escapedPattern)\\s*[:：;；.。｡﹕∶︰﹔]?\\s*([^\\s:：;；.。｡﹕∶︰﹔]{1,80})",
                 options: [.caseInsensitive]
             )
 
@@ -2589,10 +2589,52 @@ struct DefaultOCRService: OCRService {
                 continue
             }
 
-            return match.range(at: 1)
+            let valueRange = match.range(at: 1)
+            guard valueRegionTextHasVisibleContent(nsText.substring(with: valueRange)) else {
+                continue
+            }
+
+            return valueRange
+        }
+
+        let compact = normalizedOCRLabelText(text)
+        if labelRule.labelPatterns.contains(where: { compact == normalizedOCRLabelText($0) }) {
+            return nil
+        }
+
+        if let fuzzyMatch = fuzzyStaffSignatureLabelTextMatch(in: text),
+           let valueRange = staffSignatureInlineValueRange(after: fuzzyMatch.range, in: text) {
+            return valueRange
         }
 
         return nil
+    }
+
+    private static func staffSignatureInlineValueRange(
+        after labelRange: NSRange,
+        in text: String
+    ) -> NSRange? {
+        let nsText = text as NSString
+        var location = min(max(0, rangeUpperBound(labelRange)), nsText.length)
+        var upperBound = nsText.length
+        let separators = CharacterSet.whitespacesAndNewlines
+            .union(CharacterSet(charactersIn: ":：;；.。｡﹕∶︰﹔"))
+
+        while location < upperBound,
+              separators.contains(character(at: location, in: text)) {
+            location += 1
+        }
+
+        while upperBound > location,
+              separators.contains(character(at: upperBound - 1, in: text)) {
+            upperBound -= 1
+        }
+
+        guard upperBound > location else {
+            return nil
+        }
+
+        return NSRange(location: location, length: upperBound - location)
     }
 
     private static func birthdayFromNearbyIDValueCandidate(
@@ -2913,17 +2955,20 @@ struct DefaultOCRService: OCRService {
     }
 
     private static func likelyStaffSignatureFillArea(toRightOf labelBox: NormalizedRect) -> NormalizedRect {
-        let gap = 0.014
+        let rowHeight = max(labelBox.height, 0.014)
+        let gap = max(0.010, rowHeight * 0.55)
         let x = min(labelBox.maxX + gap, 0.94)
-        let width = min(max(0.24, labelBox.width * 3.2), 0.52, 0.98 - x)
-        let height = min(max(labelBox.height * 1.55, 0.034), 0.080)
-        let y = max(labelBox.centerY - height / 2, 0)
+        let width = min(max(0.24, labelBox.width * 3.2), 0.42, 0.98 - x)
+        let above = min(max(rowHeight * 3.5, 0.042), 0.070)
+        let below = min(max(rowHeight * 2.5, 0.032), 0.060)
+        let y = max(labelBox.centerY - above, 0)
+        let maxY = min(labelBox.centerY + below, 1)
 
         return NormalizedRect(
             x: x,
             y: y,
             width: width,
-            height: height
+            height: max(0, maxY - y)
         )
         .clamped()
     }
@@ -2932,13 +2977,21 @@ struct DefaultOCRService: OCRService {
         _ valueBox: NormalizedRect,
         isSameRowRightOf labelBox: NormalizedRect
     ) -> Bool {
-        let verticalCenterDelta = abs(valueBox.centerY - labelBox.centerY)
+        let searchRegion = likelyStaffSignatureFillArea(toRightOf: labelBox)
+        let intersectionArea = normalizedRectIntersectionArea(valueBox, searchRegion)
+        let valueArea = valueBox.width * valueBox.height
+        let regionArea = searchRegion.width * searchRegion.height
+        let overlapsSearchRegion = valueArea > 0 && intersectionArea / valueArea >= 0.12
+            || regionArea > 0 && intersectionArea / regionArea >= 0.015
         let rightGap = valueBox.x - labelBox.maxX
+        let rowHeight = max(max(labelBox.height, valueBox.height), 0.014)
+        let localVerticalBand = valueBox.centerY >= max(labelBox.centerY - max(rowHeight * 4.0, 0.052), 0)
+            && valueBox.centerY <= min(labelBox.centerY + max(rowHeight * 3.0, 0.040), 1)
 
         return rightGap >= -0.015
             && rightGap <= 0.52
-            && verticalCenterDelta <= max(labelBox.height, valueBox.height) * 1.05
-            && valueBox.maxX <= min(labelBox.maxX + 0.70, 1)
+            && valueBox.maxX <= min(labelBox.maxX + 0.54, 1)
+            && (overlapsSearchRegion || localVerticalBand)
     }
 
     private static func fallbackRegionHasVisibleContent(
@@ -5391,6 +5444,36 @@ struct DefaultOCRService: OCRService {
                 privateOCRRegressionTextItem("□□", box: NormalizedRect(x: 0.185, y: 0.34, width: 0.050, height: 0.020), confidence: 0.42)
             ]
         )
+        let staffLabelVariantTexts = [
+            "测试者:",
+            "测试者：",
+            "测 试 者",
+            "测 试者",
+            "测试 者",
+            "测试者;",
+            "测试者；",
+            "测试者.",
+            "测试者。"
+        ]
+        let staffLabelVariantCasesPass = staffLabelVariantTexts.allSatisfy { labelText in
+            let variantCandidates = privateOCRRegressionStrictCandidates(
+                pageID: pageID,
+                textItems: [
+                    privateOCRRegressionTextItem(labelText, box: NormalizedRect(x: 0.10, y: 0.34, width: 0.120, height: 0.020), confidence: 0.92),
+                    privateOCRRegressionTextItem("张三", box: NormalizedRect(x: 0.245, y: 0.334, width: 0.052, height: 0.020), confidence: 0.92)
+                ]
+            )
+
+            let passed = privateOCRRegressionHasStaff(
+                variantCandidates,
+                title: "测试者",
+                text: "张三",
+                valueState: .valueRecognized
+            )
+                && variantCandidates.filter { $0.category == .name }.isEmpty
+
+            return passed
+        }
         let strictDuplicateHospitalCase = finalizedCandidates(
             [
                 OCRSensitiveCandidate(
@@ -5665,6 +5748,10 @@ struct DefaultOCRService: OCRService {
                     && staffCase12.filter { $0.category == .name }.isEmpty
             ),
             PrivateOCRRegressionCheckResult(
+                name: "Extra tester label spacing and punctuation variants",
+                passed: staffLabelVariantCasesPass
+            ),
+            PrivateOCRRegressionCheckResult(
                 name: "Case 2 phone label with value",
                 passed: privateOCRRegressionHasSinglePhone(case1, title: "电话", text: "13800000000")
                     && privateOCRRegressionPhoneBoxIsRightOfLabel(case1)
@@ -5898,6 +5985,16 @@ struct DefaultOCRService: OCRService {
             matching: standardNonPatientNameLabelTexts,
             in: textItems
         ) + staffRows
+        let nonPatientLabelRows = privateOCRRegressionRows(
+            matching: standardNonPatientNameLabelTexts,
+            in: textItems
+        ) + staffRows.map { row in
+            PrivateOCRRegressionRowFact(
+                labelBox: row.labelBox,
+                rowBox: row.labelBox,
+                normalizedValue: row.normalizedValue
+            )
+        }
         let forbiddenNameRows = privateOCRRegressionRows(
             matching: forbiddenNameLabelTexts,
             in: textItems
@@ -5977,7 +6074,7 @@ struct DefaultOCRService: OCRService {
             }
         }
         let standardCandidateFromForbiddenRowsDetected = candidates.contains { candidate in
-            privateOCRRegressionCandidate(candidate, isSourcedFrom: nonPatientRows)
+            privateOCRRegressionCandidate(candidate, isSourcedFrom: nonPatientLabelRows)
                 || privateOCRRegressionCandidate(candidate, isSourcedFrom: forbiddenNameRows)
         }
         let strictExamDateCandidates = strictCandidates.filter {
@@ -6011,12 +6108,13 @@ struct DefaultOCRService: OCRService {
                 && $0.displayValueText == L10n.Review.ocrEmptyFieldValue
         }
         let strictStaffCandidates = strictCandidates.filter { $0.category == .staffSignature }
-        let strictStaffCandidateExistsIfVisible = staffRows.isEmpty || !strictStaffCandidates.isEmpty
+        let privateStaffLabelSourcePresent = privateOCRRegressionStaffLabelSourcePresent(in: textItems)
+        let strictStaffCandidateExistsIfVisible = !privateStaffLabelSourcePresent || !strictStaffCandidates.isEmpty
         let strictStaffCandidateIndependent = strictStaffCandidates.allSatisfy {
             $0.displayTitle != OCRCandidateCategory.name.displayTitle
                 && $0.category == .staffSignature
         }
-        let strictStaffRegionCoversSignatureArea = staffRows.isEmpty || strictStaffCandidates.contains { candidate in
+        let strictStaffRegionCoversSignatureArea = !privateStaffLabelSourcePresent || strictStaffCandidates.contains { candidate in
             staffRows.contains { row in
                 privateOCRRegressionRect(candidate.boundingBox, reachesRow: row.rowBox)
                     || candidate.labelBoundingBox.map { privateOCRRegressionRect($0, reachesRow: row.labelBox) } == true
@@ -6316,6 +6414,24 @@ struct DefaultOCRService: OCRService {
                 rowBox: rowBox,
                 normalizedValue: normalizedValue
             )
+        }
+    }
+
+    private static func privateOCRRegressionStaffLabelSourcePresent(
+        in textItems: [OCRTextItem]
+    ) -> Bool {
+        guard let staffLabelRule = labelRules.first(where: { $0.category == .staffSignature }) else {
+            return false
+        }
+
+        return textItems.contains { item in
+            if observedLabel(for: staffLabelRule, in: item) != nil {
+                return true
+            }
+
+            let compact = normalizedOCRLabelText(item.text)
+            return compact == normalizedOCRLabelText("试者")
+                || compact == normalizedOCRLabelText("测者")
         }
     }
 
@@ -6866,11 +6982,7 @@ private func fuzzyStaffSignatureLabelTextMatch(in text: String) -> OCRLabelTextM
         return nil
     }
 
-    let fuzzyLabels: [(needle: String, title: String)] = [
-        ("测试", "测试者"),
-        ("签", "签名")
-    ]
-    for fuzzyLabel in fuzzyLabels {
+    for fuzzyLabel in staffSignatureFuzzyLabelPatterns {
         let normalizedNeedle = normalizedOCRLabelText(fuzzyLabel.needle)
         guard compact == normalizedNeedle
             || (compact.hasPrefix(normalizedNeedle) && compact.count <= normalizedNeedle.count + 2) else {
@@ -7191,7 +7303,20 @@ private let staffSignatureLabelPatterns: [String] = [
     "Signed by"
 ]
 
+private let staffSignatureFuzzyLabelPatterns: [(needle: String, title: String)] = [
+    ("测试", "测试者"),
+    ("试者", "测试者"),
+    ("测者", "测试者"),
+    ("签", "签名")
+]
+
+private let staffSignatureFuzzyNonPatientLabelTexts: [String] = [
+    "试者",
+    "测者"
+]
+
 private let standardNonPatientNameLabelTexts: [String] = staffSignatureLabelPatterns
+    + staffSignatureFuzzyNonPatientLabelTexts
 
 private let forbiddenNameValueTexts: [String] = forbiddenNameLabelTexts + [
     "地址",
@@ -7495,6 +7620,7 @@ private let labelRules: [OCRLabelRule] = [
 ]
 
 private let allOCRLabelPatterns = labelRules.flatMap(\.labelPatterns)
+    + staffSignatureFuzzyNonPatientLabelTexts
 
 private extension OCRTargetRule {
     init(
@@ -7583,6 +7709,18 @@ private func normalizedOCRLabelText(_ text: String) -> String {
         .replacingOccurrences(of: "/", with: "")
         .replacingOccurrences(of: "\\", with: "")
         .replacingOccurrences(of: ":", with: "")
+        .replacingOccurrences(of: "：", with: "")
+        .replacingOccurrences(of: ";", with: "")
+        .replacingOccurrences(of: "；", with: "")
+        .replacingOccurrences(of: "﹔", with: "")
+        .replacingOccurrences(of: ",", with: "")
+        .replacingOccurrences(of: "，", with: "")
+        .replacingOccurrences(of: "。", with: "")
+        .replacingOccurrences(of: "．", with: "")
+        .replacingOccurrences(of: "｡", with: "")
+        .replacingOccurrences(of: "﹕", with: "")
+        .replacingOccurrences(of: "∶", with: "")
+        .replacingOccurrences(of: "︰", with: "")
         .trimmingCharacters(in: .whitespacesAndNewlines)
         .lowercased()
 }
@@ -7619,6 +7757,7 @@ private func normalizedOCRValueText(_ text: String) -> String {
         .replacingOccurrences(of: "–", with: "-")
         .replacingOccurrences(of: "／", with: "/")
         .replacingOccurrences(of: "。", with: ".")
+        .replacingOccurrences(of: "｡", with: ".")
 
     return normalizedPunctuation
         .components(separatedBy: .whitespacesAndNewlines)
