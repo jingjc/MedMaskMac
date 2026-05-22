@@ -2571,14 +2571,37 @@ struct DefaultOCRService: OCRService {
             )
         }
 
+        let emptyBox = conservativeStaffSignatureEmptyBox(toRightOf: labelBox, inside: fallbackBox)
+        let imageContentProbeBoxes = [
+            (box: fallbackBox, excludedBoxes: [labelBox]),
+            (box: emptyBox, excludedBoxes: [labelBox]),
+            (
+                box: staffSignatureInkProbeArea(around: labelBox),
+                excludedBoxes: [labelBox.padded(horizontal: 0.006, vertical: 0.006)]
+            )
+        ]
         if let sourceImage = context.sourceImage,
-           let inkBox = imageRegionMeaningfulInkBoundingBox(sourceImage, in: fallbackBox) {
+           let inkBox = imageContentProbeBoxes.compactMap({
+               imageRegionMeaningfulInkBoundingBox(
+                   sourceImage,
+                   in: $0.box,
+                   sensitivity: .handwriting,
+                   excluding: $0.excludedBoxes
+               )
+           }).first {
             return StaffSignatureFallbackAnalysis(
                 valueState: .unreadableContent,
                 boundingBox: staffSignatureBox(
                     inkBox.padded(horizontal: 0.003, vertical: 0.004),
-                    constrainedTo: fallbackBox
+                    constrainedTo: staffSignatureInkProbeArea(around: labelBox)
                 )
+            )
+        }
+
+        if context.sourceImage != nil, labelItem.recognizedText != nil {
+            return StaffSignatureFallbackAnalysis(
+                valueState: .unreadableContent,
+                boundingBox: emptyBox
             )
         }
 
@@ -2588,7 +2611,7 @@ struct DefaultOCRService: OCRService {
 
         return StaffSignatureFallbackAnalysis(
             valueState: .emptyField,
-            boundingBox: conservativeStaffSignatureEmptyBox(toRightOf: labelBox, inside: fallbackBox)
+            boundingBox: emptyBox
         )
     }
 
@@ -3010,6 +3033,24 @@ struct DefaultOCRService: OCRService {
         .clamped()
     }
 
+    private static func staffSignatureInkProbeArea(around labelBox: NormalizedRect) -> NormalizedRect {
+        let rowHeight = max(labelBox.height, 0.014)
+        let x = max(labelBox.maxX - max(rowHeight * 1.30, 0.018), 0)
+        let maxX = min(labelBox.maxX + min(max(0.28, labelBox.width * 9.0), 0.38), 0.98)
+        let above = min(max(rowHeight * 3.4, 0.048), 0.074)
+        let below = min(max(rowHeight * 5.2, 0.084), 0.110)
+        let y = max(labelBox.centerY - above, 0)
+        let lowerY = min(labelBox.centerY + below, 1)
+
+        return NormalizedRect(
+            x: x,
+            y: y,
+            width: max(0, maxX - x),
+            height: max(0, lowerY - y)
+        )
+        .clamped()
+    }
+
     private static func staffSignatureSearchArea(
         toRightOf labelBox: NormalizedRect,
         textItems: [OCRTextItem],
@@ -3193,7 +3234,12 @@ struct DefaultOCRService: OCRService {
 
         if categoryAllowsImageOnlyFallbackContent(category),
            let sourceImage = context.sourceImage,
-           imageRegionContainsMeaningfulInk(sourceImage, in: fallbackBox) {
+           let inkBox = imageRegionMeaningfulInkBoundingBox(
+               sourceImage,
+               in: fallbackBox,
+               sensitivity: imageInkDetectionSensitivity(for: category)
+           ),
+           imageOnlyFallbackInkBoxIsMeaningful(inkBox, in: fallbackBox, for: category) {
             return .unreadableContent
         }
 
@@ -3228,6 +3274,7 @@ struct DefaultOCRService: OCRService {
     private static func categoryAllowsImageOnlyFallbackContent(_ category: OCRCandidateCategory) -> Bool {
         category == .name
             || category == .staffSignature
+            || category == .email
     }
 
     private static func valueRegionTextHasVisibleContent(_ text: String) -> Bool {
@@ -3292,16 +3339,108 @@ struct DefaultOCRService: OCRService {
             && verticalCenterDelta <= max(valueBox.height, labelBox.height) * 1.20
     }
 
+    private enum ImageInkDetectionSensitivity {
+        case standard
+        case handwriting
+
+        var lumaThreshold: Double {
+            switch self {
+            case .standard:
+                return 185
+            case .handwriting:
+                return 220
+            }
+        }
+
+        var coloredLumaThreshold: Double {
+            switch self {
+            case .standard:
+                return 220
+            case .handwriting:
+                return 235
+            }
+        }
+
+        var colorDeltaThreshold: Double {
+            switch self {
+            case .standard:
+                return 38
+            case .handwriting:
+                return 22
+            }
+        }
+
+        func minimumDarkPixels(totalPixels: Int) -> Int {
+            switch self {
+            case .standard:
+                return max(12, totalPixels / 900)
+            case .handwriting:
+                return max(8, totalPixels / 1500)
+            }
+        }
+
+        func minimumActiveRows(height: Int) -> Int {
+            switch self {
+            case .standard:
+                return min(10, max(4, height / 16))
+            case .handwriting:
+                return min(8, max(3, height / 24))
+            }
+        }
+
+        func minimumActiveColumns(width: Int) -> Int {
+            switch self {
+            case .standard:
+                return min(10, max(3, width / 80))
+            case .handwriting:
+                return min(8, max(3, width / 120))
+            }
+        }
+    }
+
+    private static func imageInkDetectionSensitivity(
+        for category: OCRCandidateCategory
+    ) -> ImageInkDetectionSensitivity {
+        switch category {
+        case .staffSignature:
+            return .handwriting
+        default:
+            return .standard
+        }
+    }
+
+    private static func imageOnlyFallbackInkBoxIsMeaningful(
+        _ inkBox: NormalizedRect,
+        in fallbackBox: NormalizedRect,
+        for category: OCRCandidateCategory
+    ) -> Bool {
+        switch category {
+        case .email:
+            return inkBox.width >= 0.018
+                && inkBox.height >= max(fallbackBox.height * 0.35, 0.008)
+                && inkBox.width <= fallbackBox.width * 0.82
+        default:
+            return true
+        }
+    }
+
     private static func imageRegionContainsMeaningfulInk(
         _ sourceImage: CGImage,
-        in normalizedRect: NormalizedRect
+        in normalizedRect: NormalizedRect,
+        sensitivity: ImageInkDetectionSensitivity = .standard
     ) -> Bool {
-        imageRegionMeaningfulInkBoundingBox(sourceImage, in: normalizedRect) != nil
+        imageRegionMeaningfulInkBoundingBox(
+            sourceImage,
+            in: normalizedRect,
+            sensitivity: sensitivity
+        ) != nil
     }
 
     private static func imageRegionMeaningfulInkBoundingBox(
         _ sourceImage: CGImage,
-        in normalizedRect: NormalizedRect
+        in normalizedRect: NormalizedRect,
+        sensitivity: ImageInkDetectionSensitivity = .standard,
+        excluding excludedRects: [NormalizedRect] = []
     ) -> NormalizedRect? {
         guard let croppedImage = croppedImage(sourceImage, to: normalizedRect) else {
             return nil
@@ -3348,13 +3487,28 @@ struct DefaultOCRService: OCRService {
         var columnCounts = [Int](repeating: 0, count: width)
         for y in 0..<height {
             for x in 0..<width {
+                if imageRegionPixel(
+                    x: x,
+                    y: y,
+                    width: width,
+                    height: height,
+                    in: normalizedRect,
+                    intersectsAny: excludedRects
+                ) {
+                    continue
+                }
+
                 let offset = y * bytesPerRow + x * bytesPerPixel
                 let red = Double(pixels[offset])
                 let green = Double(pixels[offset + 1])
                 let blue = Double(pixels[offset + 2])
                 let alpha = Double(pixels[offset + 3]) / 255.0
                 let luma = 0.299 * red + 0.587 * green + 0.114 * blue
-                guard alpha > 0.12, luma < 185 else {
+                let colorDelta = max(red, green, blue) - min(red, green, blue)
+                let visibleInk = luma < sensitivity.lumaThreshold
+                    || luma < sensitivity.coloredLumaThreshold
+                    && colorDelta >= sensitivity.colorDeltaThreshold
+                guard alpha > 0.12, visibleInk else {
                     continue
                 }
 
@@ -3364,10 +3518,42 @@ struct DefaultOCRService: OCRService {
             }
         }
 
-        let horizontalLineThreshold = max(8, width / 4)
-        let verticalLineThreshold = max(8, height / 4)
-        let horizontalLineRows = rowCounts.map { $0 >= horizontalLineThreshold }
-        let verticalLineColumns = columnCounts.map { $0 >= verticalLineThreshold }
+        var rowLongestRuns = [Int](repeating: 0, count: height)
+        for y in 0..<height {
+            var currentRun = 0
+            for x in 0..<width {
+                if darkMap[y * width + x] {
+                    currentRun += 1
+                    rowLongestRuns[y] = max(rowLongestRuns[y], currentRun)
+                } else {
+                    currentRun = 0
+                }
+            }
+        }
+
+        var columnLongestRuns = [Int](repeating: 0, count: width)
+        for x in 0..<width {
+            var currentRun = 0
+            for y in 0..<height {
+                if darkMap[y * width + x] {
+                    currentRun += 1
+                    columnLongestRuns[x] = max(columnLongestRuns[x], currentRun)
+                } else {
+                    currentRun = 0
+                }
+            }
+        }
+
+        let horizontalRunThreshold = max(10, Int(Double(width) * 0.55))
+        let horizontalCountThreshold = max(16, Int(Double(width) * 0.72))
+        let verticalRunThreshold = max(10, Int(Double(height) * 0.55))
+        let verticalCountThreshold = max(16, Int(Double(height) * 0.72))
+        let horizontalLineRows = zip(rowCounts, rowLongestRuns).map { rowCount, longestRun in
+            longestRun >= horizontalRunThreshold || rowCount >= horizontalCountThreshold
+        }
+        let verticalLineColumns = zip(columnCounts, columnLongestRuns).map { columnCount, longestRun in
+            longestRun >= verticalRunThreshold || columnCount >= verticalCountThreshold
+        }
         var cleanedDarkPixels = 0
         var activeRows = [Bool](repeating: false, count: height)
         var activeColumns = [Bool](repeating: false, count: width)
@@ -3393,9 +3579,9 @@ struct DefaultOCRService: OCRService {
         }
 
         let totalPixels = width * height
-        let minimumDarkPixels = max(12, totalPixels / 900)
-        let minimumActiveRows = min(10, max(4, height / 16))
-        let minimumActiveColumns = min(10, max(3, width / 80))
+        let minimumDarkPixels = sensitivity.minimumDarkPixels(totalPixels: totalPixels)
+        let minimumActiveRows = sensitivity.minimumActiveRows(height: height)
+        let minimumActiveColumns = sensitivity.minimumActiveColumns(width: width)
 
         guard cleanedDarkPixels >= minimumDarkPixels,
               activeRows.filter(\.self).count >= minimumActiveRows,
@@ -3421,6 +3607,29 @@ struct DefaultOCRService: OCRService {
             ),
             in: normalizedRect
         )
+    }
+
+    private static func imageRegionPixel(
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        in normalizedRect: NormalizedRect,
+        intersectsAny excludedRects: [NormalizedRect]
+    ) -> Bool {
+        guard !excludedRects.isEmpty, width > 0, height > 0 else {
+            return false
+        }
+
+        let pageX = normalizedRect.x + (Double(x) + 0.5) / Double(width) * normalizedRect.width
+        let pageY = normalizedRect.y + (Double(y) + 0.5) / Double(height) * normalizedRect.height
+
+        return excludedRects.contains { excludedRect in
+            pageX >= excludedRect.x
+                && pageX <= excludedRect.maxX
+                && pageY >= excludedRect.y
+                && pageY <= excludedRect.maxY
+        }
     }
 
     private static func likelySplitNameFillArea(for group: OCRSplitNameLabelGroup) -> NormalizedRect {
@@ -5525,6 +5734,22 @@ struct DefaultOCRService: OCRService {
                 privateOCRRegressionTextItem("user@example.com", box: NormalizedRect(x: 0.240, y: 0.30, width: 0.220, height: 0.020))
             ]
         )
+        let strictEmailImageUnreadable = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("电子邮件：", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.120, height: 0.020))
+            ],
+            sourceImage: privateOCRRegressionImage(
+                inkRect: NormalizedRect(x: 0.245, y: 0.294, width: 0.070, height: 0.030)
+            )
+        )
+        let strictEmailImageBlank = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("电子邮件：", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.120, height: 0.020))
+            ],
+            sourceImage: privateOCRRegressionImage()
+        )
         let strictCase12 = privateOCRRegressionStrictCandidates(
             pageID: pageID,
             textItems: [
@@ -5628,6 +5853,22 @@ struct DefaultOCRService: OCRService {
                 privateOCRRegressionTextItem("测试", box: NormalizedRect(x: 0.10, y: 0.34, width: 0.060, height: 0.020), confidence: 0.92),
                 privateOCRRegressionTextItem("□□", box: NormalizedRect(x: 0.185, y: 0.34, width: 0.050, height: 0.020), confidence: 0.42)
             ]
+        )
+        let staffImageUnreadable = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试者：", box: NormalizedRect(x: 0.10, y: 0.34, width: 0.100, height: 0.020), confidence: 0.92)
+            ],
+            sourceImage: privateOCRRegressionImage(
+                inkRect: NormalizedRect(x: 0.205, y: 0.334, width: 0.080, height: 0.030)
+            )
+        )
+        let staffImageBlank = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("测试者：", box: NormalizedRect(x: 0.10, y: 0.34, width: 0.100, height: 0.020), confidence: 0.92)
+            ],
+            sourceImage: privateOCRRegressionImage()
         )
         let staffLabelVariantTexts = [
             "测试者:",
@@ -5882,6 +6123,13 @@ struct DefaultOCRService: OCRService {
                     )
             ),
             PrivateOCRRegressionCheckResult(
+                name: "Staff image-only handwriting is unreadable",
+                passed: privateOCRRegressionHasStaffUnreadable(staffImageUnreadable, title: "测试者")
+                    && !staffImageUnreadable.contains {
+                        $0.category == .staffSignature && $0.valueState == .emptyField
+                    }
+            ),
+            PrivateOCRRegressionCheckResult(
                 name: "Staff Case 4 split patient name plus tester",
                 passed: privateOCRRegressionHasSingleName(staffCase4, equalTo: "王小明")
                     && privateOCRRegressionHasStaff(
@@ -5950,6 +6198,11 @@ struct DefaultOCRService: OCRService {
                         maxHeight: 0.045
                     )
                     && staffCase11.filter { $0.category == .name }.isEmpty
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Staff image-only blank field remains empty",
+                passed: privateOCRRegressionHasStaffEmpty(staffImageBlank, title: "测试者")
+                    && staffImageBlank.filter { $0.category == .name }.isEmpty
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Extra fuzzy tester label with visible region",
@@ -6130,6 +6383,24 @@ struct DefaultOCRService: OCRService {
                     category: .email,
                     title: "电子邮件",
                     valueState: .unreadableContent
+                )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict image-only unreadable email region",
+                passed: privateOCRRegressionHasOnlyFallbackState(
+                    strictEmailImageUnreadable,
+                    category: .email,
+                    title: "电子邮件",
+                    valueState: .unreadableContent
+                )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict image-only blank email remains empty",
+                passed: privateOCRRegressionHasOnlyFallbackState(
+                    strictEmailImageBlank,
+                    category: .email,
+                    title: "电子邮件",
+                    valueState: .emptyField
                 )
             ),
             PrivateOCRRegressionCheckResult(
@@ -6380,6 +6651,9 @@ struct DefaultOCRService: OCRService {
                 return candidate.displayValueText == L10n.Review.ocrEmptyFieldValue
             }
         }
+        let strictPrivateStaffVisibleSignatureNotEmpty = !privateStaffLabelSourcePresent || strictStaffCandidates.allSatisfy {
+            $0.valueState != .emptyField
+        }
         let strictStaffNotMergedIntoPatientName = !strictCandidates
             .filter { $0.category == .name }
             .contains { candidate in
@@ -6531,6 +6805,10 @@ struct DefaultOCRService: OCRService {
             PrivateOCRRegressionCheckResult(
                 name: "Strict Case 11 private staff value state valid",
                 passed: strictStaffValueStateValid
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 11 private staff visible signature is not empty",
+                passed: strictPrivateStaffVisibleSignatureNotEmpty
             ),
             PrivateOCRRegressionCheckResult(name: "Case A exactly one patient name candidate", passed: exactlyOneNameCandidate),
             PrivateOCRRegressionCheckResult(name: "Case A no duplicate name candidates", passed: !duplicateNameCandidatesDetected),
@@ -6959,16 +7237,102 @@ struct DefaultOCRService: OCRService {
         OCRTextItem(text: text, recognizedText: nil, boundingBox: box, confidence: confidence)
     }
 
+    private static func privateOCRRegressionImage(
+        inkRect: NormalizedRect? = nil
+    ) -> CGImage {
+        let width = 800
+        let height = 800
+        let bytesPerPixel = 4
+        var pixels = [UInt8](repeating: 255, count: width * height * bytesPerPixel)
+
+        if let inkRect {
+            privateOCRRegressionDrawInkLine(
+                in: &pixels,
+                width: width,
+                height: height,
+                from: (inkRect.x + inkRect.width * 0.08, inkRect.y + inkRect.height * 0.70),
+                to: (inkRect.x + inkRect.width * 0.42, inkRect.y + inkRect.height * 0.25)
+            )
+            privateOCRRegressionDrawInkLine(
+                in: &pixels,
+                width: width,
+                height: height,
+                from: (inkRect.x + inkRect.width * 0.34, inkRect.y + inkRect.height * 0.65),
+                to: (inkRect.x + inkRect.width * 0.74, inkRect.y + inkRect.height * 0.20)
+            )
+            privateOCRRegressionDrawInkLine(
+                in: &pixels,
+                width: width,
+                height: height,
+                from: (inkRect.x + inkRect.width * 0.22, inkRect.y + inkRect.height * 0.55),
+                to: (inkRect.x + inkRect.width * 0.88, inkRect.y + inkRect.height * 0.60)
+            )
+        }
+
+        let data = Data(pixels)
+        guard let provider = CGDataProvider(data: data as CFData),
+              let image = CGImage(
+                  width: width,
+                  height: height,
+                  bitsPerComponent: 8,
+                  bitsPerPixel: 32,
+                  bytesPerRow: width * bytesPerPixel,
+                  space: CGColorSpaceCreateDeviceRGB(),
+                  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                  provider: provider,
+                  decode: nil,
+                  shouldInterpolate: false,
+                  intent: .defaultIntent
+              ) else {
+            fatalError("Private OCR regression image could not be created")
+        }
+
+        return image
+    }
+
+    private static func privateOCRRegressionDrawInkLine(
+        in pixels: inout [UInt8],
+        width: Int,
+        height: Int,
+        from start: (x: Double, y: Double),
+        to end: (x: Double, y: Double)
+    ) {
+        let startX = min(max(Int((start.x * Double(width)).rounded()), 0), width - 1)
+        let startY = min(max(Int((start.y * Double(height)).rounded()), 0), height - 1)
+        let endX = min(max(Int((end.x * Double(width)).rounded()), 0), width - 1)
+        let endY = min(max(Int((end.y * Double(height)).rounded()), 0), height - 1)
+        let steps = max(abs(endX - startX), abs(endY - startY), 1)
+
+        for step in 0...steps {
+            let ratio = Double(step) / Double(steps)
+            let x = Int((Double(startX) + Double(endX - startX) * ratio).rounded())
+            let y = Int((Double(startY) + Double(endY - startY) * ratio).rounded())
+
+            for yOffset in -1...1 {
+                for xOffset in -1...1 {
+                    let pixelX = min(max(x + xOffset, 0), width - 1)
+                    let pixelY = min(max(y + yOffset, 0), height - 1)
+                    let offset = (pixelY * width + pixelX) * 4
+                    pixels[offset] = 35
+                    pixels[offset + 1] = 35
+                    pixels[offset + 2] = 35
+                    pixels[offset + 3] = 255
+                }
+            }
+        }
+    }
+
     private static func privateOCRRegressionCandidates(
         pageID: PageItem.ID,
         textItems: [OCRTextItem],
-        options: OCRDetectionOptions
+        options: OCRDetectionOptions,
+        sourceImage: CGImage? = nil
     ) -> [OCRSensitiveCandidate] {
         buildCandidates(
             from: textItems,
             pageID: pageID,
             options: options,
-            context: .empty
+            context: OCRProcessingContext(sourceImage: sourceImage)
         )
     }
 
@@ -6985,12 +7349,14 @@ struct DefaultOCRService: OCRService {
 
     private static func privateOCRRegressionStrictCandidates(
         pageID: PageItem.ID,
-        textItems: [OCRTextItem]
+        textItems: [OCRTextItem],
+        sourceImage: CGImage? = nil
     ) -> [OCRSensitiveCandidate] {
         privateOCRRegressionCandidates(
             pageID: pageID,
             textItems: textItems,
-            options: OCRDetectionOptions(preset: .strict, customFields: [])
+            options: OCRDetectionOptions(preset: .strict, customFields: []),
+            sourceImage: sourceImage
         )
     }
 
