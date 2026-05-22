@@ -188,7 +188,6 @@ enum L10n {
         static let ocrCandidateStatusIgnored = L10n.string("review.ocr.status.ignored", default: "Ignored")
         static let ocrNoCandidates = L10n.string("review.ocr.no_candidates", default: "No sensitive items detected")
         static let ocrNoExplicitValue = L10n.string("review.ocr.no_explicit_value", default: "No specific content recognized. Please check this fill-in area.")
-        static let ocrRegionOnlyValue = L10n.string("review.ocr.value.region_only", default: "Text was not recognized reliably. Please review the masking area.")
         static let ocrStateIdle = L10n.string("review.ocr.state.idle", default: "Idle")
         static let ocrStateRunning = L10n.string("review.ocr.state.running", default: "Detecting current page...")
         static let ocrStateNeedsRerun = L10n.string("review.ocr.state.needs_rerun", default: "Detection settings changed. Rerun OCR for the current page.")
@@ -246,6 +245,9 @@ enum L10n {
         static func ocrStateFailed(_ reason: String) -> String {
             L10n.formatted("review.ocr.state.failed", default: "OCR failed: %@", reason)
         }
+
+        static let ocrUnreadableContentValue = L10n.string("review.ocr.value.unreadable_content", default: "Text was not recognized reliably. Please review the masking area.")
+        static let ocrEmptyFieldValue = L10n.string("review.ocr.value.empty_field", default: "No filled content detected.")
 
         static func ocrUncertainValue(_ value: String) -> String {
             L10n.formatted("review.ocr.value.uncertain", default: "Possible: %@. Please review.", value)

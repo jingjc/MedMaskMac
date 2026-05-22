@@ -109,7 +109,8 @@ enum OCRCandidateDetectionKind: String, CaseIterable, Hashable {
 enum OCRCandidateValueState: String, CaseIterable, Hashable {
     case valueRecognized
     case valueUncertain
-    case regionOnly
+    case unreadableContent
+    case emptyField
 }
 
 struct OCRSensitiveCandidate: Identifiable, Hashable {
@@ -146,7 +147,7 @@ struct OCRSensitiveCandidate: Identifiable, Hashable {
         self.pageID = pageID
         self.text = text
         self.category = category
-        self.valueState = valueState ?? (detectionKind == .labelFallback ? .regionOnly : .valueRecognized)
+        self.valueState = valueState ?? (detectionKind == .labelFallback ? .unreadableContent : .valueRecognized)
         self.sourceLabelText = sourceLabelText
         self.confidence = confidence
         self.boundingBox = boundingBox
@@ -172,8 +173,10 @@ struct OCRSensitiveCandidate: Identifiable, Hashable {
             text
         case .valueUncertain:
             L10n.Review.ocrUncertainValue(text)
-        case .regionOnly:
-            L10n.Review.ocrRegionOnlyValue
+        case .unreadableContent:
+            L10n.Review.ocrUnreadableContentValue
+        case .emptyField:
+            L10n.Review.ocrEmptyFieldValue
         }
     }
 }

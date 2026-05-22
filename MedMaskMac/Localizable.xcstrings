@@ -2540,6 +2540,40 @@
         }
       }
     },
+    "review.ocr.value.unreadable_content" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text was not recognized reliably. Please review the masking area."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能可靠识别文字，请复核遮盖范围"
+          }
+        }
+      }
+    },
+    "review.ocr.value.empty_field" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No filled content detected."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未检测到填写内容"
+          }
+        }
+      }
+    },
     "review.ocr.value.uncertain" : {
       "extractionState" : "manual",
       "localizations" : {

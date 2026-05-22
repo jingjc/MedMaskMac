@@ -71,7 +71,7 @@ struct PrivateOCRRegressionFixtureResult {
     let strictBirthdayPresent: Bool
     let strictExamDatePresent: Bool
     let strictPhoneValueExtraction: Bool
-    let strictEmailBlankSuppressed: Bool
+    let strictEmailEmptyFieldPresent: Bool
     let strictEmailCandidateCount: Int
     let strictEmailFallbackCount: Int
     let strictStaffCandidateIfVisible: Bool
@@ -2365,7 +2365,7 @@ struct DefaultOCRService: OCRService {
             fallbackBox: fallbackBox,
             options: options
         ),
-              fallbackRegionHasVisibleContent(
+              let fallbackValueState = fallbackRegionValueState(
                   category: labelRule.category,
                   labelRule: labelRule,
                   labelItem: labelItem,
@@ -2373,7 +2373,8 @@ struct DefaultOCRService: OCRService {
                   fallbackBox: fallbackBox,
                   textItems: textItems,
                   excluding: [labelIndex],
-                  context: context
+                  context: context,
+                  emitsEmptyField: shouldEmitEmptyLabelFallback(for: labelRule.category, options: options)
               ) else {
             return nil
         }
@@ -2382,6 +2383,7 @@ struct DefaultOCRService: OCRService {
             pageID: pageID,
             text: L10n.Review.ocrNoExplicitValue,
             category: labelRule.category,
+            valueState: fallbackValueState,
             sourceLabelText: sourceLabelText(
                 observedLabel.title,
                 for: labelRule.category,
@@ -2462,7 +2464,7 @@ struct DefaultOCRService: OCRService {
             fallbackBox: fallbackBox,
             options: options
         ),
-              fallbackRegionHasVisibleContent(
+              let fallbackValueState = fallbackRegionValueState(
                   category: .staffSignature,
                   labelRule: labelRule,
                   labelItem: labelItem,
@@ -2470,7 +2472,8 @@ struct DefaultOCRService: OCRService {
                   fallbackBox: fallbackBox,
                   textItems: textItems,
                   excluding: [labelIndex],
-                  context: context
+                  context: context,
+                  emitsEmptyField: shouldEmitEmptyLabelFallback(for: .staffSignature, options: options)
               ) else {
             return nil
         }
@@ -2479,7 +2482,7 @@ struct DefaultOCRService: OCRService {
             pageID: pageID,
             text: L10n.Review.ocrNoExplicitValue,
             category: .staffSignature,
-            valueState: .regionOnly,
+            valueState: fallbackValueState,
             sourceLabelText: labelTitle,
             confidence: labelItem.confidence,
             boundingBox: fallbackBox,
@@ -2501,7 +2504,7 @@ struct DefaultOCRService: OCRService {
                 pageID: pageID,
                 text: L10n.Review.ocrNoExplicitValue,
                 category: .staffSignature,
-                valueState: .regionOnly,
+                valueState: .unreadableContent,
                 sourceLabelText: labelTitle,
                 confidence: confidence,
                 boundingBox: valueBox.padded(horizontal: 0.003, vertical: 0.004),
@@ -2511,20 +2514,6 @@ struct DefaultOCRService: OCRService {
         }
 
         let valueState = staffSignatureValueState(confidence: confidence)
-        guard valueState != .regionOnly else {
-            return OCRSensitiveCandidate(
-                pageID: pageID,
-                text: L10n.Review.ocrNoExplicitValue,
-                category: .staffSignature,
-                valueState: .regionOnly,
-                sourceLabelText: labelTitle,
-                confidence: confidence,
-                boundingBox: valueBox.padded(horizontal: 0.003, vertical: 0.004),
-                labelBoundingBox: labelBox,
-                detectionKind: .labelFallback
-            )
-        }
-
         return OCRSensitiveCandidate(
             pageID: pageID,
             text: value,
@@ -2543,11 +2532,7 @@ struct DefaultOCRService: OCRService {
             return .valueRecognized
         }
 
-        if confidence >= 0.55 {
-            return .valueUncertain
-        }
-
-        return .regionOnly
+        return .valueUncertain
     }
 
     private static func staffSignatureFallbackBox(
@@ -2966,6 +2951,30 @@ struct DefaultOCRService: OCRService {
         excluding excludedIndexes: Set<Int>,
         context: OCRProcessingContext
     ) -> Bool {
+        fallbackRegionValueState(
+            category: category,
+            labelRule: labelRule,
+            labelItem: labelItem,
+            labelBox: labelBox,
+            fallbackBox: fallbackBox,
+            textItems: textItems,
+            excluding: excludedIndexes,
+            context: context,
+            emitsEmptyField: false
+        ) == .unreadableContent
+    }
+
+    private static func fallbackRegionValueState(
+        category: OCRCandidateCategory,
+        labelRule: OCRLabelRule?,
+        labelItem: OCRTextItem?,
+        labelBox: NormalizedRect,
+        fallbackBox: NormalizedRect,
+        textItems: [OCRTextItem],
+        excluding excludedIndexes: Set<Int>,
+        context: OCRProcessingContext,
+        emitsEmptyField: Bool
+    ) -> OCRCandidateValueState? {
         if let labelRule,
            let labelItem,
            let inlineValueRange = labelRule.inlineValueRange(
@@ -2978,38 +2987,66 @@ struct DefaultOCRService: OCRService {
                 inlineValue,
                 for: category,
                 confidence: labelItem.confidence
-            ) {
-                return true
+            ) || fallbackRegionAcceptsAnyVisibleText(category, emitsEmptyField: emitsEmptyField)
+                && valueRegionTextHasVisibleContent(inlineValue) {
+                return .unreadableContent
             }
         }
 
         let textEvidence = textItems.enumerated().contains { index, item in
             guard !excludedIndexes.contains(index),
-                  valueRegionTextIsPlausibleFallbackEvidence(
-                      item.text,
-                      for: category,
-                      confidence: item.confidence
-                  ),
                   valueEvidenceBox(item.boundingBox, overlaps: fallbackBox, labelBox: labelBox) else {
                 return false
             }
 
-            return true
+            return valueRegionTextIsPlausibleFallbackEvidence(
+                item.text,
+                for: category,
+                confidence: item.confidence
+            ) || fallbackRegionAcceptsAnyVisibleText(category, emitsEmptyField: emitsEmptyField)
+                && valueRegionTextHasVisibleContent(item.text)
         }
         if textEvidence {
-            return true
+            return .unreadableContent
         }
 
-        guard categoryAllowsImageOnlyFallbackContent(category),
-              let sourceImage = context.sourceImage else {
+        if categoryAllowsImageOnlyFallbackContent(category),
+           let sourceImage = context.sourceImage,
+           imageRegionContainsMeaningfulInk(sourceImage, in: fallbackBox) {
+            return .unreadableContent
+        }
+
+        return emitsEmptyField ? .emptyField : nil
+    }
+
+    private static func fallbackRegionAcceptsAnyVisibleText(
+        _ category: OCRCandidateCategory,
+        emitsEmptyField: Bool
+    ) -> Bool {
+        emitsEmptyField && category == .staffSignature
+    }
+
+    private static func shouldEmitEmptyLabelFallback(
+        for category: OCRCandidateCategory,
+        options: OCRDetectionOptions
+    ) -> Bool {
+        guard options.includedCategories.contains(category) else {
             return false
         }
 
-        return imageRegionContainsMeaningfulInk(sourceImage, in: fallbackBox)
+        switch options.preset {
+        case .strict, .custom:
+            return category == .email
+                || category == .phone
+                || category == .staffSignature
+        case .standard:
+            return false
+        }
     }
 
     private static func categoryAllowsImageOnlyFallbackContent(_ category: OCRCandidateCategory) -> Bool {
-        category == .name || category == .staffSignature
+        category == .name
+            || category == .staffSignature
     }
 
     private static func valueRegionTextHasVisibleContent(_ text: String) -> Bool {
@@ -3700,7 +3737,7 @@ struct DefaultOCRService: OCRService {
     }
 
     private static func isValidCandidateForFinalOutput(_ candidate: OCRSensitiveCandidate) -> Bool {
-        if candidate.valueState == .regionOnly {
+        if candidate.valueState == .unreadableContent || candidate.valueState == .emptyField {
             return candidate.detectionKind == .labelFallback
                 && candidate.boundingBox.width > 0
                 && candidate.boundingBox.height > 0
@@ -5256,6 +5293,12 @@ struct DefaultOCRService: OCRService {
                 privateOCRRegressionTextItem("电话：13800000000", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.320, height: 0.020))
             ]
         )
+        let strictCase12EmptyPhone = privateOCRRegressionStrictCandidates(
+            pageID: pageID,
+            textItems: [
+                privateOCRRegressionTextItem("电话：", box: NormalizedRect(x: 0.10, y: 0.30, width: 0.080, height: 0.020))
+            ]
+        )
         let strictCase13 = privateOCRRegressionStrictCandidates(
             pageID: pageID,
             textItems: [
@@ -5550,7 +5593,7 @@ struct DefaultOCRService: OCRService {
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Staff Case 3 unreadable tester region",
-                passed: privateOCRRegressionHasStaffRegionOnly(staffCase3, title: "测试者")
+                passed: privateOCRRegressionHasStaffUnreadable(staffCase3, title: "测试者")
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Staff Case 4 split patient name plus tester",
@@ -5602,8 +5645,8 @@ struct DefaultOCRService: OCRService {
                 )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Staff Case 10 invalid staff value becomes region only",
-                passed: privateOCRRegressionHasStaffRegionOnly(staffCase10, title: "测试者")
+                name: "Staff Case 10 invalid staff value becomes unreadable",
+                passed: privateOCRRegressionHasStaffUnreadable(staffCase10, title: "测试者")
                     && !privateOCRRegressionHasStaff(
                         staffCase10,
                         title: "测试者",
@@ -5612,13 +5655,13 @@ struct DefaultOCRService: OCRService {
                     )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Staff Case 11 empty tester field suppressed",
-                passed: staffCase11.filter { $0.category == .staffSignature }.isEmpty
+                name: "Staff Case 11 empty tester field",
+                passed: privateOCRRegressionHasStaffEmpty(staffCase11, title: "测试者")
                     && staffCase11.filter { $0.category == .name }.isEmpty
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Extra fuzzy tester label with visible region",
-                passed: privateOCRRegressionHasStaffRegionOnly(staffCase12, title: "测试者")
+                passed: privateOCRRegressionHasStaffUnreadable(staffCase12, title: "测试者")
                     && staffCase12.filter { $0.category == .name }.isEmpty
             ),
             PrivateOCRRegressionCheckResult(
@@ -5635,7 +5678,7 @@ struct DefaultOCRService: OCRService {
                 passed: privateOCRRegressionHasSinglePhone(case3, title: "联系电话", text: "13800000000")
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Case 3 blank phone field suppressed",
+                name: "Standard blank phone field remains suppressed",
                 passed: case4.filter { $0.category == .phone }.isEmpty
             ),
             PrivateOCRRegressionCheckResult(
@@ -5696,6 +5739,12 @@ struct DefaultOCRService: OCRService {
                     && !isLikelyValue("年龄", for: .name)
                     && !isLikelyValue("生日", for: .name)
                     && !isLikelyValue("证件号", for: .name)
+                    && !isLikelyValue("报告单", for: .name)
+                    && !isLikelyValue("医院名称", for: .name)
+                    && !isLikelyValue("项目名称", for: .name)
+                    && !isLikelyValue("检查名称", for: .name)
+                    && !isLikelyValue("文件名称", for: .name)
+                    && !isLikelyValue("名称", for: .name)
                     && !isLikelyValue("测试者", for: .name)
                     && !isLikelyValue("检查者", for: .name)
                     && !isLikelyValue("操作者", for: .name)
@@ -5770,18 +5819,22 @@ struct DefaultOCRService: OCRService {
                 )
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 8 empty email field suppressed",
-                passed: strictCase9.filter { $0.category == .email }.isEmpty
+                name: "Strict Case 8 empty email field",
+                passed: privateOCRRegressionHasOnlyFallbackState(
+                    strictCase9,
+                    category: .email,
+                    title: "电子邮件",
+                    valueState: .emptyField
+                )
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Strict Case 9 unreadable email-like region",
-                passed: privateOCRRegressionHasOnlyCandidate(
+                passed: privateOCRRegressionHasOnlyFallbackState(
                     strictCase10,
                     category: .email,
                     title: "电子邮件",
-                    text: L10n.Review.ocrNoExplicitValue
+                    valueState: .unreadableContent
                 )
-                    && strictCase10.first.map { $0.valueState == .regionOnly } == true
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Strict Case 10 email value beats fallback",
@@ -5798,11 +5851,20 @@ struct DefaultOCRService: OCRService {
                 passed: privateOCRRegressionHasSinglePhone(strictCase12, title: "电话", text: "13800000000")
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 12 tester is not patient name",
+                name: "Strict Case 12 empty phone field",
+                passed: privateOCRRegressionHasOnlyFallbackState(
+                    strictCase12EmptyPhone,
+                    category: .phone,
+                    title: "电话",
+                    valueState: .emptyField
+                )
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 13 tester is not patient name",
                 passed: strictCase13.filter { $0.category == .name }.isEmpty
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict Case 13 no standalone surname title",
+                name: "Strict Case 14 no standalone surname title",
                 passed: strictCase14.filter { $0.category == .name }.isEmpty
                     && !strictCase14.contains { $0.displayTitle == "姓" }
             ),
@@ -5943,26 +6005,18 @@ struct DefaultOCRService: OCRService {
             .count > 1
         let strictEmailCandidates = strictCandidates.filter { $0.category == .email }
         let strictEmailFallbackCount = strictEmailCandidates.filter { $0.detectionKind == .labelFallback }.count
-        let strictEmailBlankSuppressed = strictEmailCandidates.isEmpty
-        let strictStaffCandidates = strictCandidates.filter { $0.category == .staffSignature }
-        let strictStaffFieldHasVisibleContent = staffRows.contains { row in
-            fallbackRegionHasVisibleContent(
-                category: .staffSignature,
-                labelRule: nil,
-                labelItem: nil,
-                labelBox: row.labelBox,
-                fallbackBox: likelyStaffSignatureFillArea(toRightOf: row.labelBox),
-                textItems: textItems,
-                excluding: [],
-                context: OCRProcessingContext(sourceImage: sourceImage)
-            )
+        let strictEmailFieldAppearsIfLabelVisible = emailRows.isEmpty || !strictEmailCandidates.isEmpty
+        let strictEmailEmptyFieldPresent = emailRows.isEmpty || strictEmailCandidates.contains {
+            $0.valueState == .emptyField
+                && $0.displayValueText == L10n.Review.ocrEmptyFieldValue
         }
-        let strictStaffCandidateExistsIfVisible = !strictStaffFieldHasVisibleContent || !strictStaffCandidates.isEmpty
+        let strictStaffCandidates = strictCandidates.filter { $0.category == .staffSignature }
+        let strictStaffCandidateExistsIfVisible = staffRows.isEmpty || !strictStaffCandidates.isEmpty
         let strictStaffCandidateIndependent = strictStaffCandidates.allSatisfy {
             $0.displayTitle != OCRCandidateCategory.name.displayTitle
                 && $0.category == .staffSignature
         }
-        let strictStaffRegionCoversSignatureArea = !strictStaffFieldHasVisibleContent || strictStaffCandidates.contains { candidate in
+        let strictStaffRegionCoversSignatureArea = staffRows.isEmpty || strictStaffCandidates.contains { candidate in
             staffRows.contains { row in
                 privateOCRRegressionRect(candidate.boundingBox, reachesRow: row.rowBox)
                     || candidate.labelBoundingBox.map { privateOCRRegressionRect($0, reachesRow: row.labelBox) } == true
@@ -5972,8 +6026,10 @@ struct DefaultOCRService: OCRService {
             switch candidate.valueState {
             case .valueRecognized, .valueUncertain:
                 return staffSignatureDisplayValue(from: candidate.text) != nil
-            case .regionOnly:
-                return candidate.displayValueText == L10n.Review.ocrRegionOnlyValue
+            case .unreadableContent:
+                return candidate.displayValueText == L10n.Review.ocrUnreadableContentValue
+            case .emptyField:
+                return candidate.displayValueText == L10n.Review.ocrEmptyFieldValue
             }
         }
         let strictStaffNotMergedIntoPatientName = !strictCandidates
@@ -6089,8 +6145,12 @@ struct DefaultOCRService: OCRService {
                 passed: !strictTesterNameContaminationDetected
             ),
             PrivateOCRRegressionCheckResult(
-                name: "Strict private empty email suppressed",
-                passed: strictEmailBlankSuppressed && !strictDuplicateEmailFallbackDetected
+                name: "Strict private email field appears",
+                passed: strictEmailFieldAppearsIfLabelVisible && !strictDuplicateEmailFallbackDetected
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict private empty email field state",
+                passed: strictEmailEmptyFieldPresent
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Strict Case 11 private staff candidate exists if label visible",
@@ -6161,7 +6221,7 @@ struct DefaultOCRService: OCRService {
             strictBirthdayPresent: strictBirthdayValueDetected,
             strictExamDatePresent: strictExamDatePresent,
             strictPhoneValueExtraction: strictPhoneValueExtracted,
-            strictEmailBlankSuppressed: strictEmailBlankSuppressed,
+            strictEmailEmptyFieldPresent: strictEmailEmptyFieldPresent,
             strictEmailCandidateCount: strictEmailCandidates.count,
             strictEmailFallbackCount: strictEmailFallbackCount,
             strictStaffCandidateIfVisible: strictStaffCandidateExistsIfVisible,
@@ -6469,15 +6529,43 @@ struct DefaultOCRService: OCRService {
     ) -> String {
         switch candidate.category {
         case .name:
-            return candidate.detectionKind == .labelFallback ? "<REGION_FALLBACK>" : "<REDACTED_NAME>"
+            return candidate.detectionKind == .labelFallback ? privateOCRRegressionRedactedFallbackValue(for: candidate) : "<REDACTED_NAME>"
         case .staffSignature:
-            return candidate.valueState == .regionOnly ? "<REGION_FALLBACK>" : "<REDACTED_STAFF_NAME>"
+            return candidate.detectionKind == .labelFallback ? privateOCRRegressionRedactedFallbackValue(for: candidate) : "<REDACTED_STAFF_NAME>"
         case .phone:
-            return candidate.detectionKind == .labelFallback ? "<REGION_FALLBACK>" : "<REDACTED_PHONE>"
+            return candidate.detectionKind == .labelFallback ? privateOCRRegressionRedactedFallbackValue(for: candidate) : "<REDACTED_PHONE>"
         case .chineseID, .documentNumber:
             return "<REDACTED_ID>"
         default:
+            return candidate.detectionKind == .labelFallback ? privateOCRRegressionRedactedFallbackValue(for: candidate) : "<REDACTED_VALUE>"
+        }
+    }
+
+    private static func privateOCRRegressionRedactedFallbackValue(
+        for candidate: OCRSensitiveCandidate
+    ) -> String {
+        switch candidate.valueState {
+        case .emptyField:
+            return "<EMPTY_FIELD>"
+        case .unreadableContent:
+            return "<UNREADABLE_CONTENT>"
+        case .valueRecognized, .valueUncertain:
             return "<REDACTED_VALUE>"
+        }
+    }
+
+    private static func privateOCRRegressionDisplayValue(
+        for valueState: OCRCandidateValueState
+    ) -> String {
+        switch valueState {
+        case .valueRecognized:
+            return ""
+        case .valueUncertain:
+            return ""
+        case .unreadableContent:
+            return L10n.Review.ocrUnreadableContentValue
+        case .emptyField:
+            return L10n.Review.ocrEmptyFieldValue
         }
     }
 
@@ -6540,6 +6628,25 @@ struct DefaultOCRService: OCRService {
             && candidate.text == expectedText
     }
 
+    private static func privateOCRRegressionHasOnlyFallbackState(
+        _ candidates: [OCRSensitiveCandidate],
+        category: OCRCandidateCategory,
+        title expectedTitle: String,
+        valueState expectedValueState: OCRCandidateValueState
+    ) -> Bool {
+        guard candidates.count == 1,
+              let candidate = candidates.first else {
+            return false
+        }
+
+        return candidate.category == category
+            && candidate.displayTitle == expectedTitle
+            && candidate.detectionKind == .labelFallback
+            && candidate.text == L10n.Review.ocrNoExplicitValue
+            && candidate.valueState == expectedValueState
+            && candidate.displayValueText == privateOCRRegressionDisplayValue(for: expectedValueState)
+    }
+
     private static func privateOCRRegressionHasOnlyCanonicalDateCandidate(
         _ candidates: [OCRSensitiveCandidate],
         category: OCRCandidateCategory,
@@ -6596,15 +6703,27 @@ struct DefaultOCRService: OCRService {
         }
     }
 
-    private static func privateOCRRegressionHasStaffRegionOnly(
+    private static func privateOCRRegressionHasStaffUnreadable(
         _ candidates: [OCRSensitiveCandidate],
         title expectedTitle: String
     ) -> Bool {
         candidates.contains {
             $0.category == .staffSignature
                 && $0.displayTitle == expectedTitle
-                && $0.valueState == .regionOnly
-                && $0.displayValueText == L10n.Review.ocrRegionOnlyValue
+                && $0.valueState == .unreadableContent
+                && $0.displayValueText == L10n.Review.ocrUnreadableContentValue
+        }
+    }
+
+    private static func privateOCRRegressionHasStaffEmpty(
+        _ candidates: [OCRSensitiveCandidate],
+        title expectedTitle: String
+    ) -> Bool {
+        candidates.contains {
+            $0.category == .staffSignature
+                && $0.displayTitle == expectedTitle
+                && $0.valueState == .emptyField
+                && $0.displayValueText == L10n.Review.ocrEmptyFieldValue
         }
     }
 
@@ -7082,6 +7201,7 @@ private let forbiddenNameValueTexts: [String] = forbiddenNameLabelTexts + [
     "证件号",
     "身份证号",
     "使用协议",
+    "报告单",
     "Threshold",
     "ABR"
 ] + standardNonPatientNameLabelTexts + [

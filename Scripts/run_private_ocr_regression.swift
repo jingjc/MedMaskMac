@@ -75,7 +75,7 @@ struct PrivateOCRRegressionMain {
             print("strictBirthdayPresent=\(result.strictBirthdayPresent)")
             print("strictExamDatePresent=\(result.strictExamDatePresent)")
             print("strictPhoneValueExtraction=\(result.strictPhoneValueExtraction)")
-            print("strictEmailBlankSuppressed=\(result.strictEmailBlankSuppressed)")
+            print("strictEmailEmptyFieldPresent=\(result.strictEmailEmptyFieldPresent)")
             print("strictEmailCandidateCount=\(result.strictEmailCandidateCount)")
             print("strictEmailFallbackCount=\(result.strictEmailFallbackCount)")
             print("strictStaffCandidateIfVisible=\(result.strictStaffCandidateIfVisible)")
