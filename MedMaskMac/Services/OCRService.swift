@@ -2452,29 +2452,22 @@ struct DefaultOCRService: OCRService {
             )
         }
 
-        let fallbackBox = staffSignatureFallbackBox(
+        guard let fallback = staffSignatureFallbackAnalysis(
             toRightOf: observedLabel.boundingBox,
             labelRule: labelRule,
             labelItem: labelItem,
             textItems: textItems,
-            excluding: [labelIndex]
-        )
+            excluding: [labelIndex],
+            context: context,
+            emitsEmptyField: shouldEmitEmptyLabelFallback(for: .staffSignature, options: options)
+        ) else {
+            return nil
+        }
         guard allowsLabelFallback(
             for: .staffSignature,
-            fallbackBox: fallbackBox,
+            fallbackBox: fallback.boundingBox,
             options: options
-        ),
-              let fallbackValueState = fallbackRegionValueState(
-                  category: .staffSignature,
-                  labelRule: labelRule,
-                  labelItem: labelItem,
-                  labelBox: observedLabel.boundingBox,
-                  fallbackBox: fallbackBox,
-                  textItems: textItems,
-                  excluding: [labelIndex],
-                  context: context,
-                  emitsEmptyField: shouldEmitEmptyLabelFallback(for: .staffSignature, options: options)
-              ) else {
+        ) else {
             return nil
         }
 
@@ -2482,10 +2475,10 @@ struct DefaultOCRService: OCRService {
             pageID: pageID,
             text: L10n.Review.ocrNoExplicitValue,
             category: .staffSignature,
-            valueState: fallbackValueState,
+            valueState: fallback.valueState,
             sourceLabelText: labelTitle,
             confidence: labelItem.confidence,
-            boundingBox: fallbackBox,
+            boundingBox: fallback.boundingBox,
             labelBoundingBox: observedLabel.boundingBox,
             detectionKind: .labelFallback
         )
@@ -2535,38 +2528,82 @@ struct DefaultOCRService: OCRService {
         return .valueUncertain
     }
 
-    private static func staffSignatureFallbackBox(
+    private struct StaffSignatureFallbackAnalysis {
+        let valueState: OCRCandidateValueState
+        let boundingBox: NormalizedRect
+    }
+
+    private static func staffSignatureFallbackAnalysis(
         toRightOf labelBox: NormalizedRect,
         labelRule: OCRLabelRule,
         labelItem: OCRTextItem,
         textItems: [OCRTextItem],
-        excluding excludedIndexes: Set<Int>
-    ) -> NormalizedRect {
-        var fallbackBox = likelyStaffSignatureFillArea(toRightOf: labelBox)
-
-        if let inlineValueRange = staffSignatureInlineValueRange(
+        excluding excludedIndexes: Set<Int>,
+        context: OCRProcessingContext,
+        emitsEmptyField: Bool
+    ) -> StaffSignatureFallbackAnalysis? {
+        let fallbackBox = staffSignatureFallbackBox(
+            toRightOf: labelBox,
             labelRule: labelRule,
-            in: labelItem.text
-        ),
-           let inlineValueBox = appNormalizedRect(
-               for: inlineValueRange,
-               in: labelItem.recognizedText,
-               text: labelItem.text,
-               fallbackBounds: labelItem.boundingBox
-           ) {
-            fallbackBox = unionRect(fallbackBox, inlineValueBox)
-        }
+            labelItem: labelItem,
+            textItems: textItems,
+            excluding: excludedIndexes
+        )
 
-        for (index, item) in textItems.enumerated() {
+        let textEvidenceBoxes = textItems.enumerated().compactMap { index, item -> NormalizedRect? in
             guard !excludedIndexes.contains(index),
-                  staffSignatureValueBox(item.boundingBox, isSameRowRightOf: labelBox) else {
-                continue
+                  staffSignatureFallbackEvidenceBox(item.boundingBox, overlaps: fallbackBox),
+                  valueRegionTextHasVisibleContent(item.text) else {
+                return nil
             }
 
-            fallbackBox = unionRect(fallbackBox, item.boundingBox)
+            return item.boundingBox
+        }
+        if let textEvidenceBox = textEvidenceBoxes.reduce(nil as NormalizedRect?, { partial, box -> NormalizedRect? in
+            partial.map { unionRect($0, box) } ?? box
+        }) {
+            return StaffSignatureFallbackAnalysis(
+                valueState: .unreadableContent,
+                boundingBox: staffSignatureBox(
+                    textEvidenceBox.padded(horizontal: 0.003, vertical: 0.004),
+                    constrainedTo: fallbackBox
+                )
+            )
         }
 
-        return fallbackBox.clamped()
+        if let sourceImage = context.sourceImage,
+           let inkBox = imageRegionMeaningfulInkBoundingBox(sourceImage, in: fallbackBox) {
+            return StaffSignatureFallbackAnalysis(
+                valueState: .unreadableContent,
+                boundingBox: staffSignatureBox(
+                    inkBox.padded(horizontal: 0.003, vertical: 0.004),
+                    constrainedTo: fallbackBox
+                )
+            )
+        }
+
+        guard emitsEmptyField else {
+            return nil
+        }
+
+        return StaffSignatureFallbackAnalysis(
+            valueState: .emptyField,
+            boundingBox: conservativeStaffSignatureEmptyBox(toRightOf: labelBox, inside: fallbackBox)
+        )
+    }
+
+    private static func staffSignatureFallbackBox(
+        toRightOf labelBox: NormalizedRect,
+        labelRule _: OCRLabelRule,
+        labelItem _: OCRTextItem,
+        textItems: [OCRTextItem],
+        excluding excludedIndexes: Set<Int>
+    ) -> NormalizedRect {
+        staffSignatureSearchArea(
+            toRightOf: labelBox,
+            textItems: textItems,
+            excluding: excludedIndexes
+        )
     }
 
     private static func staffSignatureInlineValueRange(
@@ -2956,11 +2993,11 @@ struct DefaultOCRService: OCRService {
 
     private static func likelyStaffSignatureFillArea(toRightOf labelBox: NormalizedRect) -> NormalizedRect {
         let rowHeight = max(labelBox.height, 0.014)
-        let gap = max(0.010, rowHeight * 0.55)
+        let gap = max(0.008, rowHeight * 0.45)
         let x = min(labelBox.maxX + gap, 0.94)
-        let width = min(max(0.24, labelBox.width * 3.2), 0.42, 0.98 - x)
-        let above = min(max(rowHeight * 3.5, 0.042), 0.070)
-        let below = min(max(rowHeight * 2.5, 0.032), 0.060)
+        let width = min(max(0.20, labelBox.width * 3.0), 0.34, 0.98 - x)
+        let above = min(max(rowHeight * 2.8, 0.036), 0.058)
+        let below = min(max(rowHeight * 1.8, 0.026), 0.044)
         let y = max(labelBox.centerY - above, 0)
         let maxY = min(labelBox.centerY + below, 1)
 
@@ -2973,6 +3010,61 @@ struct DefaultOCRService: OCRService {
         .clamped()
     }
 
+    private static func staffSignatureSearchArea(
+        toRightOf labelBox: NormalizedRect,
+        textItems: [OCRTextItem],
+        excluding excludedIndexes: Set<Int>
+    ) -> NormalizedRect {
+        let baseArea = likelyStaffSignatureFillArea(toRightOf: labelBox)
+        let rowHeight = max(labelBox.height, 0.014)
+        let boundaryGap = max(rowHeight * 0.18, 0.003)
+        let boundaryBoxes = textItems.enumerated().compactMap { index, item -> NormalizedRect? in
+            guard !excludedIndexes.contains(index),
+                  staffSignatureBoundaryRowBox(item.boundingBox, near: labelBox) else {
+                return nil
+            }
+
+            return item.boundingBox
+        }
+
+        let previousBoundary = boundaryBoxes
+            .filter { $0.centerY < labelBox.centerY - rowHeight * 0.75 }
+            .max { $0.centerY < $1.centerY }
+        let nextBoundary = boundaryBoxes
+            .filter { $0.centerY > labelBox.centerY + rowHeight * 0.75 }
+            .min { $0.centerY < $1.centerY }
+
+        let minY = max(baseArea.y, previousBoundary.map { $0.maxY + boundaryGap } ?? 0)
+        let maxY = min(baseArea.maxY, nextBoundary.map { $0.y - boundaryGap } ?? 1)
+        guard maxY > minY else {
+            return conservativeStaffSignatureEmptyBox(toRightOf: labelBox, inside: baseArea)
+        }
+
+        return NormalizedRect(
+            x: baseArea.x,
+            y: minY,
+            width: baseArea.width,
+            height: maxY - minY
+        )
+        .clamped()
+    }
+
+    private static func staffSignatureBoundaryRowBox(
+        _ rowBox: NormalizedRect,
+        near labelBox: NormalizedRect
+    ) -> Bool {
+        let horizontalBoundaryBand = labelBox.maxX + max(labelBox.width * 0.80, 0.035)
+        let nearLabelColumn = rowBox.x <= horizontalBoundaryBand
+            || rowBox.centerX <= labelBox.centerX + max(labelBox.width * 1.8, 0.090)
+        let localVerticalDistance = abs(rowBox.centerY - labelBox.centerY) <= 0.16
+        let overlapsLabel = normalizedRectIntersectionArea(rowBox, labelBox) > 0
+
+        return nearLabelColumn
+            && localVerticalDistance
+            && !overlapsLabel
+            && !staffSignatureValueBox(rowBox, isSameRowRightOf: labelBox)
+    }
+
     private static func staffSignatureValueBox(
         _ valueBox: NormalizedRect,
         isSameRowRightOf labelBox: NormalizedRect
@@ -2981,17 +3073,53 @@ struct DefaultOCRService: OCRService {
         let intersectionArea = normalizedRectIntersectionArea(valueBox, searchRegion)
         let valueArea = valueBox.width * valueBox.height
         let regionArea = searchRegion.width * searchRegion.height
-        let overlapsSearchRegion = valueArea > 0 && intersectionArea / valueArea >= 0.12
+        let overlapsSearchRegion = valueArea > 0 && intersectionArea / valueArea >= 0.18
             || regionArea > 0 && intersectionArea / regionArea >= 0.015
         let rightGap = valueBox.x - labelBox.maxX
-        let rowHeight = max(max(labelBox.height, valueBox.height), 0.014)
-        let localVerticalBand = valueBox.centerY >= max(labelBox.centerY - max(rowHeight * 4.0, 0.052), 0)
-            && valueBox.centerY <= min(labelBox.centerY + max(rowHeight * 3.0, 0.040), 1)
 
-        return rightGap >= -0.015
-            && rightGap <= 0.52
-            && valueBox.maxX <= min(labelBox.maxX + 0.54, 1)
-            && (overlapsSearchRegion || localVerticalBand)
+        return rightGap >= -0.012
+            && rightGap <= 0.38
+            && valueBox.maxX <= min(searchRegion.maxX + 0.018, 1)
+            && overlapsSearchRegion
+    }
+
+    private static func staffSignatureFallbackEvidenceBox(
+        _ valueBox: NormalizedRect,
+        overlaps fallbackBox: NormalizedRect
+    ) -> Bool {
+        let intersectionArea = normalizedRectIntersectionArea(valueBox, fallbackBox)
+        let valueArea = valueBox.width * valueBox.height
+        let fallbackArea = fallbackBox.width * fallbackBox.height
+
+        return valueArea > 0 && intersectionArea / valueArea >= 0.28
+            || fallbackArea > 0 && intersectionArea / fallbackArea >= 0.040
+    }
+
+    private static func staffSignatureBox(
+        _ candidateBox: NormalizedRect,
+        constrainedTo fallbackBox: NormalizedRect
+    ) -> NormalizedRect {
+        normalizedRectIntersection(candidateBox, fallbackBox.padded(horizontal: 0.006, vertical: 0.006))
+            ?? candidateBox
+    }
+
+    private static func conservativeStaffSignatureEmptyBox(
+        toRightOf labelBox: NormalizedRect,
+        inside fallbackBox: NormalizedRect
+    ) -> NormalizedRect {
+        let rowHeight = max(labelBox.height, 0.014)
+        let height = min(max(rowHeight * 1.45, 0.024), fallbackBox.height)
+        let centeredY = labelBox.centerY - height / 2
+        let y = min(max(centeredY, fallbackBox.y), max(fallbackBox.y, fallbackBox.maxY - height))
+        let width = min(max(labelBox.width * 2.4, 0.16), fallbackBox.width, 0.28)
+
+        return NormalizedRect(
+            x: fallbackBox.x,
+            y: y,
+            width: width,
+            height: height
+        )
+        .clamped()
     }
 
     private static func fallbackRegionHasVisibleContent(
@@ -3168,8 +3296,15 @@ struct DefaultOCRService: OCRService {
         _ sourceImage: CGImage,
         in normalizedRect: NormalizedRect
     ) -> Bool {
+        imageRegionMeaningfulInkBoundingBox(sourceImage, in: normalizedRect) != nil
+    }
+
+    private static func imageRegionMeaningfulInkBoundingBox(
+        _ sourceImage: CGImage,
+        in normalizedRect: NormalizedRect
+    ) -> NormalizedRect? {
         guard let croppedImage = croppedImage(sourceImage, to: normalizedRect) else {
-            return false
+            return nil
         }
 
         let maxScanWidth = 640
@@ -3205,7 +3340,7 @@ struct DefaultOCRService: OCRService {
             return true
         }
         guard drewImage else {
-            return false
+            return nil
         }
 
         var darkMap = [Bool](repeating: false, count: width * height)
@@ -3236,6 +3371,10 @@ struct DefaultOCRService: OCRService {
         var cleanedDarkPixels = 0
         var activeRows = [Bool](repeating: false, count: height)
         var activeColumns = [Bool](repeating: false, count: width)
+        var minInkX = width
+        var minInkY = height
+        var maxInkX = -1
+        var maxInkY = -1
 
         for y in 0..<height where !horizontalLineRows[y] {
             for x in 0..<width where !verticalLineColumns[x] {
@@ -3246,6 +3385,10 @@ struct DefaultOCRService: OCRService {
                 cleanedDarkPixels += 1
                 activeRows[y] = true
                 activeColumns[x] = true
+                minInkX = min(minInkX, x)
+                minInkY = min(minInkY, y)
+                maxInkX = max(maxInkX, x)
+                maxInkY = max(maxInkY, y)
             }
         }
 
@@ -3254,9 +3397,30 @@ struct DefaultOCRService: OCRService {
         let minimumActiveRows = min(10, max(4, height / 16))
         let minimumActiveColumns = min(10, max(3, width / 80))
 
-        return cleanedDarkPixels >= minimumDarkPixels
-            && activeRows.filter(\.self).count >= minimumActiveRows
-            && activeColumns.filter(\.self).count >= minimumActiveColumns
+        guard cleanedDarkPixels >= minimumDarkPixels,
+              activeRows.filter(\.self).count >= minimumActiveRows,
+              activeColumns.filter(\.self).count >= minimumActiveColumns,
+              minInkX <= maxInkX,
+              minInkY <= maxInkY else {
+            return nil
+        }
+
+        let paddingX = max(2.0, Double(width) * 0.010)
+        let paddingY = max(2.0, Double(height) * 0.012)
+        let localX = max((Double(minInkX) - paddingX) / Double(width), 0)
+        let localY = max((Double(minInkY) - paddingY) / Double(height), 0)
+        let localMaxX = min((Double(maxInkX + 1) + paddingX) / Double(width), 1)
+        let localMaxY = min((Double(maxInkY + 1) + paddingY) / Double(height), 1)
+
+        return pageRect(
+            from: NormalizedRect(
+                x: localX,
+                y: localY,
+                width: max(0, localMaxX - localX),
+                height: max(0, localMaxY - localY)
+            ),
+            in: normalizedRect
+        )
     }
 
     private static func likelySplitNameFillArea(for group: OCRSplitNameLabelGroup) -> NormalizedRect {
@@ -4532,6 +4696,27 @@ struct DefaultOCRService: OCRService {
         return width * height
     }
 
+    private static func normalizedRectIntersection(
+        _ left: NormalizedRect,
+        _ right: NormalizedRect
+    ) -> NormalizedRect? {
+        let x = max(left.x, right.x)
+        let y = max(left.y, right.y)
+        let maxX = min(left.maxX, right.maxX)
+        let maxY = min(left.maxY, right.maxY)
+        guard maxX > x, maxY > y else {
+            return nil
+        }
+
+        return NormalizedRect(
+            x: x,
+            y: y,
+            width: maxX - x,
+            height: maxY - y
+        )
+        .clamped()
+    }
+
     private static func isPreferredCandidate(
         _ candidate: OCRSensitiveCandidate,
         over existingCandidate: OCRSensitiveCandidate
@@ -5659,6 +5844,12 @@ struct DefaultOCRService: OCRService {
                     text: "张三",
                     valueState: .valueRecognized
                 )
+                    && privateOCRRegressionHasLocalStaffBox(
+                        staffCase1,
+                        title: "测试者",
+                        maxWidth: 0.10,
+                        maxHeight: 0.040
+                    )
                     && staffCase1.filter { $0.category == .name }.isEmpty
             ),
             PrivateOCRRegressionCheckResult(
@@ -5669,6 +5860,12 @@ struct DefaultOCRService: OCRService {
                     text: "张三",
                     valueState: .valueUncertain
                 )
+                    && privateOCRRegressionHasLocalStaffBox(
+                        staffCase2,
+                        title: "测试者",
+                        maxWidth: 0.10,
+                        maxHeight: 0.040
+                    )
                     && staffCase2.contains {
                         $0.category == .staffSignature
                             && $0.displayValueText.contains("张三")
@@ -5677,6 +5874,12 @@ struct DefaultOCRService: OCRService {
             PrivateOCRRegressionCheckResult(
                 name: "Staff Case 3 unreadable tester region",
                 passed: privateOCRRegressionHasStaffUnreadable(staffCase3, title: "测试者")
+                    && privateOCRRegressionHasLocalStaffBox(
+                        staffCase3,
+                        title: "测试者",
+                        maxWidth: 0.10,
+                        maxHeight: 0.040
+                    )
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Staff Case 4 split patient name plus tester",
@@ -5740,6 +5943,12 @@ struct DefaultOCRService: OCRService {
             PrivateOCRRegressionCheckResult(
                 name: "Staff Case 11 empty tester field",
                 passed: privateOCRRegressionHasStaffEmpty(staffCase11, title: "测试者")
+                    && privateOCRRegressionHasLocalStaffBox(
+                        staffCase11,
+                        title: "测试者",
+                        maxWidth: 0.29,
+                        maxHeight: 0.045
+                    )
                     && staffCase11.filter { $0.category == .name }.isEmpty
             ),
             PrivateOCRRegressionCheckResult(
@@ -6004,6 +6213,10 @@ struct DefaultOCRService: OCRService {
             matching: ["电子邮件", "邮箱", "Email", "E-mail"],
             in: textItems
         )
+        let addressRows = privateOCRRegressionRows(
+            matching: ["地址", "住址", "家庭地址", "联系地址"],
+            in: textItems
+        )
         let splitNameGroups = splitNameLabelGroups(in: textItems)
         let pairedSplitNameGroups = splitNameGroups
             .filter { $0.givenNameBoundingBox != nil }
@@ -6118,6 +6331,43 @@ struct DefaultOCRService: OCRService {
             staffRows.contains { row in
                 privateOCRRegressionRect(candidate.boundingBox, reachesRow: row.rowBox)
                     || candidate.labelBoundingBox.map { privateOCRRegressionRect($0, reachesRow: row.labelBox) } == true
+            }
+        }
+        let strictStaffBoxIsLocal = !privateStaffLabelSourcePresent || strictStaffCandidates.allSatisfy { candidate in
+            guard let labelBox = candidate.labelBoundingBox else {
+                return false
+            }
+
+            let allowedArea = staffSignatureSearchArea(
+                toRightOf: labelBox,
+                textItems: textItems,
+                excluding: []
+            )
+            let candidateArea = candidate.boundingBox.width * candidate.boundingBox.height
+            let localArea = normalizedRectIntersectionArea(
+                candidate.boundingBox,
+                allowedArea.padded(horizontal: 0.012, vertical: 0.012)
+            )
+
+            return candidateArea > 0
+                && localArea / candidateArea >= 0.78
+                && candidate.boundingBox.width <= 0.36
+                && candidate.boundingBox.height <= 0.090
+                && candidate.boundingBox.maxY <= labelBox.centerY + max(labelBox.height * 3.6, 0.060)
+        }
+        let strictStaffBoxAvoidsPhoneRows = strictStaffCandidates.allSatisfy { candidate in
+            !phoneRows.contains { row in
+                privateOCRRegressionRect(candidate.boundingBox, reachesRow: row.expectedValueBox)
+            }
+        }
+        let strictStaffBoxAvoidsEmailRows = strictStaffCandidates.allSatisfy { candidate in
+            !emailRows.contains { row in
+                privateOCRRegressionRect(candidate.boundingBox, reachesRow: row.rowBox)
+            }
+        }
+        let strictStaffBoxAvoidsAddressRows = strictStaffCandidates.allSatisfy { candidate in
+            !addressRows.contains { row in
+                privateOCRRegressionRect(candidate.boundingBox, reachesRow: row.rowBox)
             }
         }
         let strictStaffValueStateValid = strictStaffCandidates.allSatisfy { candidate in
@@ -6261,6 +6511,22 @@ struct DefaultOCRService: OCRService {
             PrivateOCRRegressionCheckResult(
                 name: "Strict Case 11 private staff region covers signature area",
                 passed: strictStaffRegionCoversSignatureArea
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 11 private staff box is local",
+                passed: strictStaffBoxIsLocal
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 11 private staff box avoids phone row",
+                passed: strictStaffBoxAvoidsPhoneRows
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 11 private staff box avoids email row",
+                passed: strictStaffBoxAvoidsEmailRows
+            ),
+            PrivateOCRRegressionCheckResult(
+                name: "Strict Case 11 private staff box avoids address rows",
+                passed: strictStaffBoxAvoidsAddressRows
             ),
             PrivateOCRRegressionCheckResult(
                 name: "Strict Case 11 private staff value state valid",
@@ -6802,6 +7068,29 @@ struct DefaultOCRService: OCRService {
     ) -> Bool {
         candidates.contains {
             $0.category == .hospital && $0.text.contains(text)
+        }
+    }
+
+    private static func privateOCRRegressionHasLocalStaffBox(
+        _ candidates: [OCRSensitiveCandidate],
+        title expectedTitle: String,
+        maxWidth: Double,
+        maxHeight: Double
+    ) -> Bool {
+        candidates.contains { candidate in
+            guard candidate.category == .staffSignature,
+                  candidate.displayTitle == expectedTitle,
+                  candidate.boundingBox.width <= maxWidth,
+                  candidate.boundingBox.height <= maxHeight else {
+                return false
+            }
+
+            guard let labelBox = candidate.labelBoundingBox else {
+                return true
+            }
+
+            return candidate.boundingBox.x >= labelBox.maxX - 0.020
+                && abs(candidate.boundingBox.centerY - labelBox.centerY) <= max(labelBox.height * 4.0, 0.070)
         }
     }
 
