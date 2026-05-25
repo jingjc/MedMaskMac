@@ -14,8 +14,8 @@ struct RegionEditorOverlayView: View {
     @State private var moveSession: RegionMoveSession?
     @State private var resizeSession: RegionResizeSession?
 
-    private let minimumRegionWidth: CGFloat = 12
-    private let minimumRegionHeight: CGFloat = 8
+    private let minimumRegionWidth: CGFloat = 10
+    private let minimumRegionHeight: CGFloat = 10
     private let handleDiameter: CGFloat = 12
     private let handleHitDiameter: CGFloat = 30
 

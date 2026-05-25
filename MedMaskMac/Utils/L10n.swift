@@ -90,6 +90,8 @@ enum L10n {
     }
 
     enum Common {
+        static let supportedV0ImportTypes = L10n.string("common.supported_v0_import_types", default: "PDF / PNG / JPG / JPEG")
+
         static func supportedFormats(_ types: String) -> String {
             L10n.formatted("common.supported_formats", default: "Supported: %@", types)
         }
@@ -125,9 +127,26 @@ enum L10n {
         static func totalSessionRegions(_ count: Int) -> String {
             L10n.formatted("common.total_session_regions", default: "Total session regions: %@", countText(count))
         }
+
+        static func currentProcessedRegions(_ count: Int) -> String {
+            L10n.formatted("common.current_processed_regions", default: "当前已识别/已处理区域：%@", countText(count))
+        }
     }
 
     enum Import {
+        static let v0Title = L10n.string("import.v0.title", default: "导入批次")
+        static let v0Description = L10n.string("import.v0.description", default: "选择本地 PDF 或图片文件，文件仅保留在当前会话内，不上传、不保存历史。")
+        static let dropAreaTitle = L10n.string("import.v0.drop_area_title", default: "拖入检查单 PDF 或图片")
+        static let dropAreaSubtitle = L10n.string("import.v0.drop_area_subtitle", default: "支持 PDF / PNG / JPG / JPEG，可批量导入")
+        static let privacyTitle = L10n.string("import.v0.privacy_title", default: "隐私提示")
+        static let privacyLocalOnly = L10n.string("import.v0.privacy_local_only", default: "仅本机处理")
+        static let privacyNoUpload = L10n.string("import.v0.privacy_no_upload", default: "不登录、不上传、不云 OCR")
+        static let privacySessionOnly = L10n.string("import.v0.privacy_session_only", default: "当前会话内保留，关闭后不保证恢复")
+        static let currentSessionTitle = L10n.string("import.v0.current_session", default: "当前会话")
+        static let importedListTitle = L10n.string("import.v0.imported_list_title", default: "待处理文件")
+        static let modeTitle = L10n.string("import.v0.mode_title", default: "模式说明")
+        static let modeDescription = L10n.string("import.v0.mode_description", default: "标准：核心身份信息优先。严格：额外显示更多可能身份线索。自定义：用户自行控制字段开关。")
+        static let continueAdding = L10n.string("import.v0.continue_adding", default: "继续添加")
         static let title = L10n.string("import.title", default: "Import Page")
         static let description = L10n.string("import.description", default: "Choose local PDF or image files to load them into the current session.")
         static let actionTitle = L10n.string("import.card.title", default: "Import Files")
@@ -160,6 +179,22 @@ enum L10n {
     }
 
     enum Review {
+        static let documentContextTitle = L10n.string("review.v0.document_context", default: "文档 / 页面")
+        static let originalPreviewLabel = L10n.string("review.v0.original_preview", default: "原件")
+        static let maskedPreviewLabel = L10n.string("review.v0.masked_preview", default: "脱敏预览")
+        static let zoomOut = L10n.string("review.v0.zoom_out", default: "缩小")
+        static let zoomIn = L10n.string("review.v0.zoom_in", default: "放大")
+        static let fitToWidthLabel = L10n.string("review.v0.fit_to_width", default: "适应宽度")
+        static let fitToWindowLabel = L10n.string("review.v0.fit_to_window", default: "适应窗口")
+        static let candidateReliable = L10n.string("review.v0.candidate_reliable", default: "可靠")
+        static let candidateUncertain = L10n.string("review.v0.candidate_uncertain", default: "可能")
+        static let candidateUnreadable = L10n.string("review.v0.candidate_unreadable", default: "读不出")
+        static let candidateEmpty = L10n.string("review.v0.candidate_empty", default: "空字段")
+        static let candidateMasked = L10n.string("review.v0.candidate_masked", default: "已脱敏")
+        static let candidateIgnored = L10n.string("review.v0.candidate_ignored", default: "已忽略")
+        static let candidatePending = L10n.string("review.v0.candidate_pending", default: "待处理")
+        static let noVisibleCandidates = L10n.string("review.v0.no_visible_candidates", default: "本页未识别到敏感候选")
+        static let reviewReminder = L10n.string("review.v0.review_reminder", default: "OCR 建议仅作参考，导出前必须人工复核。")
         static let filesTitle = L10n.string("review.sidebar.files_title", default: "Files")
         static let filesSubtitle = L10n.string("review.sidebar.files_subtitle", default: "Imported documents in the current session.")
         static let noImportedFiles = L10n.string("review.sidebar.no_files", default: "No files imported yet.")
@@ -278,6 +313,14 @@ enum L10n {
     }
 
     enum Export {
+        static let successFilesTitle = L10n.string("export.v0.success_files_title", default: "成功文件")
+        static let failedFilesTitle = L10n.string("export.v0.failed_files_title", default: "失败文件")
+        static let exportedStatus = L10n.string("export.v0.exported_status", default: "已导出")
+        static let noSuccessfulFiles = L10n.string("export.v0.no_success_files", default: "当前还没有成功导出的文件。")
+        static let noFailedFiles = L10n.string("export.v0.no_failed_files", default: "当前没有失败文件。")
+        static let processedFilesTitle = L10n.string("export.v0.processed_files_title", default: "已处理文件")
+        static let continueNextBatch = L10n.string("export.v0.continue_next_batch", default: "继续处理下一批")
+        static let currentRecognizedRegions = L10n.string("export.v0.current_recognized_regions", default: "区域数按当前已识别/已处理结果统计；若后台识别仍在运行，不代表全部页面最终总数。")
         static let title = L10n.string("export.title", default: "Export Summary")
         static let description = L10n.string("export.description", default: "Review the current session, export redacted copies to a local folder, and inspect any per-file failures.")
         static let preparedTitle = L10n.string("export.prepared_title", default: "Prepared Session")

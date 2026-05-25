@@ -5,8 +5,8 @@ struct ReviewEditPageView: View {
     @FocusState private var isPreviewFocused: Bool
     @State private var canvasViewportSize: CGSize = .zero
 
-    private let sidebarWidth: CGFloat = 290
-    private let inspectorWidth: CGFloat = 320
+    private let sidebarWidth: CGFloat = 240
+    private let inspectorWidth: CGFloat = 360
 
     var body: some View {
         HStack(spacing: 0) {
@@ -131,8 +131,14 @@ struct ReviewEditPageView: View {
     private var canvas: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text(L10n.Review.canvasSectionTitle)
-                    .font(.title2.weight(.semibold))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.Navigation.title(for: .reviewEdit))
+                        .font(.title2.weight(.semibold))
+
+                    Text(L10n.Review.reviewReminder)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
 
                 PanelCard(
                     title: viewModel.canvasTitle,
@@ -143,16 +149,36 @@ struct ReviewEditPageView: View {
 
                     VStack(spacing: 18) {
                         VStack(spacing: 10) {
-                            HStack(spacing: 12) {
+                            HStack(alignment: .top, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(L10n.Review.documentContextTitle)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+
+                                    Text(viewModel.selectedFileDisplayLabel)
+                                        .font(.headline)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+
+                                    Text(viewModel.selectedPageDisplayLabel)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Spacer()
+
                                 Picker(L10n.Review.previewMode, selection: $viewModel.previewDisplayMode) {
                                     ForEach(ReviewPreviewMode.allCases) { mode in
-                                        Text(mode.title).tag(mode)
+                                        Text(previewModeTitle(for: mode)).tag(mode)
                                     }
                                 }
                                 .pickerStyle(.segmented)
-                                .frame(width: 280)
+                                .frame(width: 220)
                                 .disabled(!viewModel.hasImportedFiles)
+                            }
 
+                            HStack(spacing: 12) {
+                                zoomControls(contentSize: previewCanvasSize)
                                 Spacer()
 
                                 Button(L10n.Review.undo) {
@@ -170,14 +196,15 @@ struct ReviewEditPageView: View {
                                 }
                                 .disabled(!viewModel.canBeginExportFlow)
                             }
-
-                            zoomControls(contentSize: previewCanvasSize)
                         }
 
                         DocumentPreviewView(
                             content: previewContent,
                             regions: viewModel.displayedPreviewRegions,
+                            candidateHighlights: candidateHighlights,
                             selectedRegionID: viewModel.selectedRegionID,
+                            focusedCandidateID: viewModel.selectedOCRCandidateID,
+                            focusedCandidateBounds: focusedCandidateBounds,
                             isEditingEnabled: viewModel.isEditingEnabled,
                             zoomScale: viewModel.resolvedCanvasZoomScale(
                                 contentSize: previewCanvasSize,
@@ -202,10 +229,6 @@ struct ReviewEditPageView: View {
                         }
 
                         HStack {
-                            Label(viewModel.selectedFileDisplayLabel, systemImage: "doc.text")
-                            Spacer()
-                            Label(viewModel.selectedPageDisplayLabel, systemImage: "doc.plaintext")
-                            Spacer()
                             HStack(spacing: 8) {
                                 Button(L10n.Review.previousPage) {
                                     viewModel.goToPreviousPage()
@@ -254,7 +277,7 @@ struct ReviewEditPageView: View {
 
     private func zoomControls(contentSize: CGSize?) -> some View {
         HStack(spacing: 8) {
-            Button("-") {
+            Button(L10n.Review.zoomOut) {
                 viewModel.zoomCanvasOut(
                     contentSize: contentSize,
                     viewportSize: canvasViewportSize
@@ -269,7 +292,7 @@ struct ReviewEditPageView: View {
             .font(.caption.monospacedDigit())
             .frame(width: 52)
 
-            Button("+") {
+            Button(L10n.Review.zoomIn) {
                 viewModel.zoomCanvasIn(
                     contentSize: contentSize,
                     viewportSize: canvasViewportSize
@@ -280,22 +303,15 @@ struct ReviewEditPageView: View {
             Divider()
                 .frame(height: 18)
 
-            Button(L10n.Review.fitToWindow) {
-                viewModel.fitCanvasToWindow()
-            }
-            .disabled(contentSize == nil)
-
-            Button(L10n.Review.fitToWidth) {
+            Button(L10n.Review.fitToWidthLabel) {
                 viewModel.fitCanvasToWidth()
             }
             .disabled(contentSize == nil)
 
-            Button(L10n.Review.actualSize) {
-                viewModel.resetCanvasZoomToActualSize()
+            Button(L10n.Review.fitToWindowLabel) {
+                viewModel.fitCanvasToWindow()
             }
             .disabled(contentSize == nil)
-
-            Spacer()
         }
         .controlSize(.small)
     }
@@ -306,6 +322,51 @@ struct ReviewEditPageView: View {
         }
 
         return rasterContent.canvasSize
+    }
+
+    private func previewModeTitle(for mode: ReviewPreviewMode) -> String {
+        switch mode {
+        case .original:
+            L10n.Review.originalPreviewLabel
+        case .maskedPreview:
+            L10n.Review.maskedPreviewLabel
+        }
+    }
+
+    private var candidateHighlights: [DocumentPreviewCandidateHighlight] {
+        guard viewModel.isEditingEnabled else {
+            return []
+        }
+
+        return viewModel.visibleSelectedPageOCRCandidates.compactMap { candidate in
+            guard candidate.boundingBox.width > 0,
+                  candidate.boundingBox.height > 0 else {
+                return nil
+            }
+
+            let isSelected = viewModel.selectedOCRCandidateID == candidate.id
+
+            if candidate.status == .masked && !isSelected {
+                return nil
+            }
+
+            return DocumentPreviewCandidateHighlight(
+                id: candidate.id,
+                bounds: candidate.boundingBox,
+                status: DocumentPreviewCandidateHighlight.Status(candidate.status),
+                isSelected: isSelected
+            )
+        }
+    }
+
+    private var focusedCandidateBounds: NormalizedRect? {
+        guard let selectedOCRCandidateID = viewModel.selectedOCRCandidateID else {
+            return nil
+        }
+
+        return viewModel.visibleSelectedPageOCRCandidates
+            .first { $0.id == selectedOCRCandidateID }?
+            .boundingBox
     }
 
     private var inspector: some View {
@@ -324,6 +385,7 @@ struct ReviewEditPageView: View {
                                 Text(preset.title).tag(preset)
                             }
                         }
+                        .pickerStyle(.segmented)
 
                         Text(viewModel.selectedPreset.summary)
                             .font(.subheadline)
@@ -336,7 +398,7 @@ struct ReviewEditPageView: View {
                         Divider()
 
                         Label(viewModel.selectedFileRegionsSummary, systemImage: "square.dashed")
-                        Label(viewModel.totalSessionRegionsSummary, systemImage: "square.stack.3d.down.right")
+                        Label(viewModel.preparedRegionsSummary, systemImage: "square.stack.3d.down.right")
                         Label(viewModel.maskPreviewSummary, systemImage: "rectangle.and.pencil.and.ellipsis")
                     }
                 }
@@ -403,7 +465,7 @@ struct ReviewEditPageView: View {
                                     )
                                 }
                             } else {
-                                Text(L10n.Review.ocrNoCandidates)
+                                Text(L10n.Review.noVisibleCandidates)
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
@@ -458,15 +520,33 @@ private struct OCRCandidateRow: View {
     let onLocate: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(candidate.displayTitle)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(candidate.displayTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 8)
+
+                Text(stateBadgeText)
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .foregroundStyle(stateBadgeForeground)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(stateBadgeBackground)
+                    )
+            }
 
             Text(candidate.displayValueText)
                 .font(.subheadline)
-                .lineLimit(1)
+                .foregroundStyle(valueForeground)
+                .lineLimit(3)
                 .truncationMode(.middle)
+                .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 8) {
                 Button(L10n.Review.maskOCRCandidate) {
@@ -490,19 +570,15 @@ private struct OCRCandidateRow: View {
             }
             .controlSize(.small)
         }
-        .padding(10)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .opacity(candidate.status == .ignored ? 0.58 : 1)
         .background(rowBackgroundColor)
         .overlay(
-            HStack(spacing: 0) {
-                Rectangle()
-                    .fill(isSelected ? Color.secondary.opacity(0.45) : Color.clear)
-                    .frame(width: 3)
-                Spacer(minLength: 0)
-            }
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(rowBorderColor, lineWidth: isSelected ? 2 : 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var canMask: Bool {
@@ -519,14 +595,105 @@ private struct OCRCandidateRow: View {
 
     private var rowBackgroundColor: Color {
         if isSelected {
-            return Color(nsColor: .separatorColor).opacity(0.18)
+            return Color.accentColor.opacity(0.10)
         }
 
         switch candidate.status {
-        case .pending, .masked:
-            return Color(nsColor: .controlBackgroundColor)
+        case .pending:
+            switch candidate.valueState {
+            case .valueUncertain, .unreadableContent:
+                return Color.orange.opacity(0.10)
+            case .emptyField:
+                return Color(nsColor: .controlBackgroundColor)
+            case .valueRecognized:
+                return Color(nsColor: .controlBackgroundColor)
+            }
+        case .masked:
+            return Color.green.opacity(0.10)
         case .ignored:
             return Color(nsColor: .controlBackgroundColor).opacity(0.55)
         }
+    }
+
+    private var rowBorderColor: Color {
+        if isSelected {
+            return Color.accentColor
+        }
+
+        switch candidate.status {
+        case .pending:
+            switch candidate.valueState {
+            case .valueUncertain, .unreadableContent:
+                return Color.orange.opacity(0.45)
+            case .emptyField:
+                return Color.secondary.opacity(0.18)
+            case .valueRecognized:
+                return Color.red.opacity(0.28)
+            }
+        case .masked:
+            return Color.green.opacity(0.42)
+        case .ignored:
+            return Color.secondary.opacity(0.22)
+        }
+    }
+
+    private var valueForeground: Color {
+        switch candidate.status {
+        case .ignored:
+            return Color.secondary
+        case .masked:
+            return Color.primary
+        case .pending:
+            switch candidate.valueState {
+            case .valueUncertain, .unreadableContent:
+                return Color.orange
+            case .emptyField:
+                return Color.secondary
+            case .valueRecognized:
+                return Color.primary
+            }
+        }
+    }
+
+    private var stateBadgeText: String {
+        switch candidate.status {
+        case .masked:
+            return L10n.Review.candidateMasked
+        case .ignored:
+            return L10n.Review.candidateIgnored
+        case .pending:
+            switch candidate.valueState {
+            case .valueRecognized:
+                return L10n.Review.candidateReliable
+            case .valueUncertain:
+                return L10n.Review.candidateUncertain
+            case .unreadableContent:
+                return L10n.Review.candidateUnreadable
+            case .emptyField:
+                return L10n.Review.candidateEmpty
+            }
+        }
+    }
+
+    private var stateBadgeForeground: Color {
+        switch candidate.status {
+        case .masked:
+            return Color.green
+        case .ignored:
+            return Color.secondary
+        case .pending:
+            switch candidate.valueState {
+            case .valueUncertain, .unreadableContent:
+                return Color.orange
+            case .emptyField:
+                return Color.secondary
+            case .valueRecognized:
+                return Color.red
+            }
+        }
+    }
+
+    private var stateBadgeBackground: Color {
+        stateBadgeForeground.opacity(0.14)
     }
 }

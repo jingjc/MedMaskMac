@@ -4,7 +4,10 @@ import SwiftUI
 struct DocumentPreviewView: View {
     let content: DocumentPreviewContent
     let regions: [SensitiveRegion]
+    let candidateHighlights: [DocumentPreviewCandidateHighlight]
     let selectedRegionID: SensitiveRegion.ID?
+    let focusedCandidateID: OCRSensitiveCandidate.ID?
+    let focusedCandidateBounds: NormalizedRect?
     let isEditingEnabled: Bool
     let zoomScale: CGFloat
     @Binding var scrollOffset: CGPoint
@@ -69,10 +72,19 @@ struct DocumentPreviewView: View {
             width: max(renderedSize.width, viewportSize.width),
             height: max(renderedSize.height, viewportSize.height)
         )
+        let canvasOrigin = CGPoint(
+            x: max((documentSize.width - renderedSize.width) / 2, 0),
+            y: max((documentSize.height - renderedSize.height) / 2, 0)
+        )
+        let focusedRect = focusedCandidateBounds?
+            .rect(in: renderedSize)
+            .offsetBy(dx: canvasOrigin.x, dy: canvasOrigin.y)
 
         if renderedSize.width > 0, renderedSize.height > 0 {
             CanvasScrollView(
                 documentSize: documentSize,
+                focusedID: focusedCandidateID,
+                focusedRect: focusedRect,
                 scrollOffset: $scrollOffset
             ) {
                 previewCanvas(for: rasterContent, renderedSize: renderedSize)
@@ -110,6 +122,14 @@ struct DocumentPreviewView: View {
                 .allowsHitTesting(false)
 
             if isEditingEnabled {
+                CandidateHighlightOverlayView(
+                    contentSize: renderedSize,
+                    highlights: candidateHighlights
+                )
+                .allowsHitTesting(false)
+            }
+
+            if isEditingEnabled {
                 RegionEditorOverlayView(
                     contentSize: renderedSize,
                     regions: regions,
@@ -132,17 +152,112 @@ struct DocumentPreviewView: View {
     }
 }
 
+struct DocumentPreviewCandidateHighlight: Identifiable, Hashable {
+    enum Status: Hashable {
+        case pending
+        case masked
+        case ignored
+
+        init(_ candidateStatus: OCRCandidateStatus) {
+            switch candidateStatus {
+            case .pending:
+                self = .pending
+            case .masked:
+                self = .masked
+            case .ignored:
+                self = .ignored
+            }
+        }
+    }
+
+    let id: OCRSensitiveCandidate.ID
+    let bounds: NormalizedRect
+    let status: Status
+    let isSelected: Bool
+}
+
+private struct CandidateHighlightOverlayView: View {
+    let contentSize: CGSize
+    let highlights: [DocumentPreviewCandidateHighlight]
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(highlights) { highlight in
+                let rect = highlight.bounds.rect(in: contentSize)
+
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(fillColor(for: highlight))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .strokeBorder(
+                                strokeColor(for: highlight),
+                                style: strokeStyle(for: highlight)
+                            )
+                    )
+                    .frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
+            }
+        }
+        .frame(width: contentSize.width, height: contentSize.height, alignment: .topLeading)
+    }
+
+    private func fillColor(for highlight: DocumentPreviewCandidateHighlight) -> Color {
+        if highlight.isSelected {
+            return Color.accentColor.opacity(0.12)
+        }
+
+        switch highlight.status {
+        case .pending:
+            return Color.red.opacity(0.14)
+        case .masked:
+            return Color.black.opacity(0.18)
+        case .ignored:
+            return Color.secondary.opacity(0.06)
+        }
+    }
+
+    private func strokeColor(for highlight: DocumentPreviewCandidateHighlight) -> Color {
+        if highlight.isSelected {
+            return Color.accentColor
+        }
+
+        switch highlight.status {
+        case .pending:
+            return Color.red
+        case .masked:
+            return Color.black.opacity(0.65)
+        case .ignored:
+            return Color.secondary.opacity(0.65)
+        }
+    }
+
+    private func strokeStyle(for highlight: DocumentPreviewCandidateHighlight) -> StrokeStyle {
+        switch highlight.status {
+        case .pending, .masked:
+            return StrokeStyle(lineWidth: highlight.isSelected ? 2.5 : 1.5)
+        case .ignored:
+            return StrokeStyle(lineWidth: highlight.isSelected ? 2.5 : 1.5, dash: [7, 4])
+        }
+    }
+}
+
 private struct CanvasScrollView<Content: View>: NSViewRepresentable {
     let documentSize: CGSize
+    let focusedID: OCRSensitiveCandidate.ID?
+    let focusedRect: CGRect?
     @Binding var scrollOffset: CGPoint
     let content: Content
 
     init(
         documentSize: CGSize,
+        focusedID: OCRSensitiveCandidate.ID?,
+        focusedRect: CGRect?,
         scrollOffset: Binding<CGPoint>,
         @ViewBuilder content: () -> Content
     ) {
         self.documentSize = documentSize
+        self.focusedID = focusedID
+        self.focusedRect = focusedRect
         self._scrollOffset = scrollOffset
         self.content = content()
     }
@@ -183,6 +298,7 @@ private struct CanvasScrollView<Content: View>: NSViewRepresentable {
         }
 
         scrollView.documentView?.setFrameSize(documentSize)
+        context.coordinator.focusIfNeeded(in: scrollView)
         context.coordinator.applyStoredScrollOffset(in: scrollView)
     }
 
@@ -190,6 +306,7 @@ private struct CanvasScrollView<Content: View>: NSViewRepresentable {
         var parent: CanvasScrollView
         private weak var observedScrollView: NSScrollView?
         private var isApplyingStoredOffset = false
+        private var lastFocusedID: OCRSensitiveCandidate.ID?
 
         init(parent: CanvasScrollView) {
             self.parent = parent
@@ -223,6 +340,32 @@ private struct CanvasScrollView<Content: View>: NSViewRepresentable {
                   abs(currentOffset.y - clampedOffset.y) > 0.5 else {
                 return
             }
+
+            isApplyingStoredOffset = true
+            scrollView.contentView.setBoundsOrigin(clampedOffset)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            isApplyingStoredOffset = false
+        }
+
+        func focusIfNeeded(in scrollView: NSScrollView) {
+            guard let focusedID = parent.focusedID else {
+                lastFocusedID = nil
+                return
+            }
+
+            guard focusedID != lastFocusedID,
+                  let focusedRect = parent.focusedRect else {
+                return
+            }
+
+            let viewportSize = scrollView.contentView.bounds.size
+            let targetOffset = CGPoint(
+                x: focusedRect.midX - viewportSize.width / 2,
+                y: focusedRect.midY - viewportSize.height / 2
+            )
+            let clampedOffset = clampedScrollOffset(targetOffset, in: scrollView)
+            lastFocusedID = focusedID
+            parent.scrollOffset = clampedOffset
 
             isApplyingStoredOffset = true
             scrollView.contentView.setBoundsOrigin(clampedOffset)

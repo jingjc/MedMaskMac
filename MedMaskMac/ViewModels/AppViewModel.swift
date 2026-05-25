@@ -12,7 +12,7 @@ final class AppViewModel: ObservableObject {
             }
 
             lastExportResult = nil
-            invalidateCurrentPageOCRCandidatesForOptionChange()
+            handleOCRDisplayOptionsChanged()
         }
     }
     @Published var selectedCustomFields: Set<MaskCustomField> = MaskCustomField.defaultEnabledFields {
@@ -23,7 +23,7 @@ final class AppViewModel: ObservableObject {
 
             lastExportResult = nil
             if selectedPreset == .custom {
-                invalidateCurrentPageOCRCandidatesForOptionChange()
+                handleOCRDisplayOptionsChanged()
             }
         }
     }
@@ -92,7 +92,7 @@ final class AppViewModel: ObservableObject {
     }
 
     var supportedImportTypes: String {
-        fileImportService.supportedFileTypes().joined(separator: ", ")
+        L10n.Common.supportedV0ImportTypes
     }
 
     var importGuidanceMessage: String {
@@ -417,7 +417,7 @@ final class AppViewModel: ObservableObject {
     }
 
     var preparedRegionsSummary: String {
-        L10n.Common.regionCount(totalRegionCount)
+        L10n.Common.currentProcessedRegions(totalRegionCount)
     }
 
     var lastExportDestinationPath: String? {
@@ -438,6 +438,27 @@ final class AppViewModel: ObservableObject {
         }
 
         return L10n.Export.failureCount(lastExportResult.failureCount)
+    }
+
+    var processedExportFilesSummary: String {
+        guard let lastExportResult else {
+            return L10n.Common.fileCount(files.count)
+        }
+
+        return L10n.Common.fileCount(lastExportResult.successCount + lastExportResult.failureCount)
+    }
+
+    var successfulExportFileNames: [String] {
+        guard let lastExportResult else {
+            return []
+        }
+
+        let failedFileNames = Set(lastExportResult.failures.map(\.fileName))
+
+        return files
+            .filter { !failedFileNames.contains($0.displayName) }
+            .prefix(lastExportResult.successCount)
+            .map(exportedDisplayName(for:))
     }
 
     var hasExportFailures: Bool {
@@ -805,6 +826,7 @@ final class AppViewModel: ObservableObject {
             ocrCandidates[candidateIndex].status = .masked
             ocrCandidates[candidateIndex].linkedRegionID = createdRegionID
             selectedRegionID = createdRegionID
+            selectedOCRCandidateID = candidateID
         }
 
         if startedImplicitTransaction {
@@ -860,7 +882,7 @@ final class AppViewModel: ObservableObject {
         ocrCandidates[candidateIndex].linkedRegionID = nil
 
         if selectedOCRCandidateID == candidateID {
-            selectedOCRCandidateID = nil
+            selectedRegionID = nil
         }
     }
 
@@ -887,6 +909,24 @@ final class AppViewModel: ObservableObject {
         }
 
         exportService.openFolder(at: destinationURL)
+    }
+
+    func continueNextBatch() {
+        files.removeAll()
+        selectedFileID = nil
+        selectedPageID = nil
+        selectedRegionID = nil
+        selectedOCRCandidateID = nil
+        importErrorMessage = nil
+        lastExportResult = nil
+        currentPageOCRState = .idle
+        ocrCandidates.removeAll()
+        lastSelectedPageByFileID.removeAll()
+        canvasZoomStates.removeAll()
+        canvasScrollOffsets.removeAll()
+        clearPageHistory()
+        previewDisplayMode = .original
+        selectedPage = .import
     }
 
     private func applySelection(for file: FileItem, preferredPageID: PageItem.ID?) {
@@ -1261,32 +1301,6 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private func invalidateCurrentPageOCRCandidatesForOptionChange() {
-        guard let selectedPageID else {
-            selectedOCRCandidateID = nil
-            return
-        }
-
-        clearOCRCandidates(on: selectedPageID)
-
-        if !currentPageOCRState.isRunning, selectedDocumentPage != nil {
-            currentPageOCRState = .needsRerun
-        }
-    }
-
-    private func clearOCRCandidates(on pageID: PageItem.ID) {
-        let removedSelectedCandidate = selectedOCRCandidateID.map { selectedCandidateID in
-            ocrCandidates.contains { $0.id == selectedCandidateID && $0.pageID == pageID }
-        } ?? false
-
-        ocrCandidates.removeAll { $0.pageID == pageID }
-
-        if removedSelectedCandidate {
-            selectedOCRCandidateID = nil
-            selectedRegionID = nil
-        }
-    }
-
     private func clearHiddenOCRCandidateSelection() {
         guard let selectedOCRCandidateID,
               let candidate = ocrCandidates.first(where: { $0.id == selectedOCRCandidateID }),
@@ -1295,6 +1309,14 @@ final class AppViewModel: ObservableObject {
         }
 
         self.selectedOCRCandidateID = nil
+    }
+
+    private func handleOCRDisplayOptionsChanged() {
+        clearHiddenOCRCandidateSelection()
+
+        if !currentPageOCRState.isRunning, selectedDocumentPage != nil {
+            currentPageOCRState = .needsRerun
+        }
     }
 
     private func reconcileOCRCandidatesWithSelectedPage() {
@@ -1417,6 +1439,26 @@ final class AppViewModel: ObservableObject {
             regions: selectedDocumentPage.sensitiveRegions,
             selectedRegionID: selectedRegionID
         )
+    }
+
+    private func exportedDisplayName(for file: FileItem) -> String {
+        let sourceURL = URL(fileURLWithPath: file.displayName)
+        let baseName = sourceURL.deletingPathExtension().lastPathComponent
+        let fileExtension: String
+
+        switch file.kind {
+        case .pdf:
+            fileExtension = "pdf"
+        case .image:
+            switch file.sourceURL?.pathExtension.lowercased() {
+            case "jpg", "jpeg":
+                fileExtension = "jpg"
+            default:
+                fileExtension = "png"
+            }
+        }
+
+        return "\(baseName)_redacted.\(fileExtension)"
     }
 }
 
