@@ -21,6 +21,7 @@ enum L10n {
 
     enum App {
         static let title = L10n.string("app.title", default: "MedMask Mac")
+        static let sidebarSubtitle = L10n.string("app.sidebar_subtitle", default: "本地脱敏流程准备 PDF 或图像")
         static let pagePickerLabel = L10n.string("app.page_picker_label", default: "Page")
     }
 
