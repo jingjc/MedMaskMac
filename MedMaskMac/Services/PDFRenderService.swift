@@ -2,25 +2,23 @@ import AppKit
 import Foundation
 import PDFKit
 
-struct DocumentPreviewRasterContent {
+nonisolated struct DocumentPreviewRasterContent {
     let image: NSImage
     let canvasSize: CGSize
 }
 
-enum DocumentPreviewContent {
+nonisolated enum DocumentPreviewContent {
     case empty
     case raster(DocumentPreviewRasterContent)
     case failure(message: String)
 }
 
-@MainActor
-protocol PDFRenderService {
+nonisolated protocol PDFRenderService {
     func canvasTitle(for page: PageItem?) -> String
     func previewContent(for file: FileItem?, page: PageItem?) -> DocumentPreviewContent
 }
 
-@MainActor
-final class DefaultPDFRenderService: PDFRenderService {
+nonisolated final class DefaultPDFRenderService: PDFRenderService {
     private var imageCache: [URL: NSImage] = [:]
     private var pdfCache: [URL: PDFDocument] = [:]
     private var pdfPageCache: [PDFPageCacheKey: DocumentPreviewRasterContent] = [:]
@@ -154,7 +152,7 @@ final class DefaultPDFRenderService: PDFRenderService {
     }
 }
 
-private struct PDFPageCacheKey: Hashable {
+nonisolated private struct PDFPageCacheKey: Hashable {
     let sourceURL: URL
     let pageIndex: Int
 }

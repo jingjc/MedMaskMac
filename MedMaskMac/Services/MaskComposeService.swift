@@ -2,7 +2,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-protocol MaskComposeService {
+nonisolated protocol MaskComposeService {
     func previewSummary(for preset: MaskPreset, regionCount: Int) -> String
     func maskedPreview(
         from rasterContent: DocumentPreviewRasterContent,
@@ -17,7 +17,7 @@ protocol MaskComposeService {
     func exportRegions(from page: PageItem, preset: MaskPreset) -> [SensitiveRegion]
 }
 
-struct DefaultMaskComposeService: MaskComposeService {
+nonisolated struct DefaultMaskComposeService: MaskComposeService {
     func previewSummary(for preset: MaskPreset, regionCount: Int) -> String {
         L10n.Services.maskPreviewSummary(presetTitle: preset.title, regionCount: regionCount)
     }

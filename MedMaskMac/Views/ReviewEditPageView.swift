@@ -440,11 +440,13 @@ struct ReviewEditPageView: View {
                         Divider()
 
                         VStack(alignment: .leading, spacing: 10) {
+                            let visibleCandidates = viewModel.visibleSelectedPageOCRCandidates
+
                             Text(L10n.Review.ocrDetectedItemsTitle)
                                 .font(.headline)
 
-                            if viewModel.hasVisibleSelectedPageOCRCandidates {
-                                ForEach(viewModel.visibleSelectedPageOCRCandidates) { candidate in
+                            if !visibleCandidates.isEmpty {
+                                ForEach(visibleCandidates) { candidate in
                                     OCRCandidateRow(
                                         candidate: candidate,
                                         isSelected: viewModel.selectedOCRCandidateID == candidate.id,

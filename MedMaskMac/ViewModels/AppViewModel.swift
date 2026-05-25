@@ -13,6 +13,7 @@ final class AppViewModel: ObservableObject {
 
             lastExportResult = nil
             handleOCRDisplayOptionsChanged()
+            schedulePreviewRefresh()
         }
     }
     @Published var selectedCustomFields: Set<MaskCustomField> = MaskCustomField.defaultEnabledFields {
@@ -25,6 +26,7 @@ final class AppViewModel: ObservableObject {
             if selectedPreset == .custom {
                 handleOCRDisplayOptionsChanged()
             }
+            schedulePreviewRefresh()
         }
     }
     @Published var previewDisplayMode: ReviewPreviewMode = .original {
@@ -32,6 +34,7 @@ final class AppViewModel: ObservableObject {
             if previewDisplayMode == .maskedPreview {
                 selectedRegionID = nil
             }
+            schedulePreviewRefresh()
         }
     }
     @Published var files: [FileItem] {
@@ -41,6 +44,7 @@ final class AppViewModel: ObservableObject {
             }
 
             lastExportResult = nil
+            schedulePreviewRefresh()
         }
     }
     @Published var selectedFileID: FileItem.ID?
@@ -49,8 +53,14 @@ final class AppViewModel: ObservableObject {
     @Published var importErrorMessage: String?
     @Published var lastExportResult: ExportResult?
     @Published var currentPageOCRState: CurrentPageOCRState = .idle
-    @Published var ocrCandidates: [OCRSensitiveCandidate] = []
+    @Published private(set) var previewContent: DocumentPreviewContent = .empty
+    @Published var ocrCandidates: [OCRSensitiveCandidate] = [] {
+        didSet {
+            ocrCandidatesRevision += 1
+        }
+    }
     @Published var selectedOCRCandidateID: OCRSensitiveCandidate.ID?
+    @Published private var recognizingPageIDs: Set<PageItem.ID> = []
 
     private let fileImportService: any FileImportService
     private let pdfRenderService: any PDFRenderService
@@ -58,6 +68,7 @@ final class AppViewModel: ObservableObject {
     private let barcodeService: any BarcodeService
     private let maskComposeService: any MaskComposeService
     private let exportService: any ExportService
+    private let previewRenderer = PreviewRenderer()
     private var lastSelectedPageByFileID: [FileItem.ID: PageItem.ID] = [:]
     private var undoStack: [PageEditSnapshot] = []
     private var redoStack: [PageEditSnapshot] = []
@@ -68,6 +79,14 @@ final class AppViewModel: ObservableObject {
     private let canvasZoomStep: CGFloat = 1.25
     @Published private var canvasZoomStates: [PageItem.ID: CanvasZoomState] = [:]
     private var canvasScrollOffsets: [PageItem.ID: CGPoint] = [:]
+    private var previewRenderTask: Task<Void, Never>?
+    private var pendingPreviewKey: PreviewContentCacheKey?
+    private var renderedPreviewKey: PreviewContentCacheKey?
+    private var previewContentCache: [PreviewContentCacheKey: DocumentPreviewContent] = [:]
+    private var pageOCRStates: [PageItem.ID: CurrentPageOCRState] = [:]
+    private var ocrCandidatesRevision = 0
+    private var visibleCandidatesCacheKey: VisibleCandidateCacheKey?
+    private var visibleCandidatesCache: [OCRSensitiveCandidate] = []
 
     init() {
         self.files = []
@@ -101,24 +120,6 @@ final class AppViewModel: ObservableObject {
 
     var canvasTitle: String {
         pdfRenderService.canvasTitle(for: selectedDocumentPage)
-    }
-
-    var previewContent: DocumentPreviewContent {
-        let baseContent = pdfRenderService.previewContent(for: selectedFile, page: selectedDocumentPage)
-
-        guard previewDisplayMode == .maskedPreview,
-              let selectedDocumentPage,
-              case let .raster(rasterContent) = baseContent else {
-            return baseContent
-        }
-
-        return .raster(
-            maskComposeService.maskedPreview(
-                from: rasterContent,
-                regions: selectedDocumentPage.sensitiveRegions,
-                preset: selectedPreset
-            )
-        )
     }
 
     var ocrSummary: String {
@@ -192,7 +193,14 @@ final class AppViewModel: ObservableObject {
     }
 
     var canDetectCurrentPageOCR: Bool {
-        hasImportedFiles && selectedFile != nil && selectedDocumentPage != nil && !currentPageOCRState.isRunning
+        guard hasImportedFiles,
+              selectedFile != nil,
+              selectedDocumentPage != nil,
+              let selectedPageID else {
+            return false
+        }
+
+        return !recognizingPageIDs.contains(selectedPageID)
     }
 
     var currentPageOCRStateSummary: String {
@@ -219,9 +227,19 @@ final class AppViewModel: ObservableObject {
     }
 
     var visibleSelectedPageOCRCandidates: [OCRSensitiveCandidate] {
+        let cacheKey = VisibleCandidateCacheKey(
+            pageID: selectedPageID,
+            includedCategories: ocrDetectionOptions.includedCategories,
+            revision: ocrCandidatesRevision
+        )
+
+        if cacheKey == visibleCandidatesCacheKey {
+            return visibleCandidatesCache
+        }
+
         let includedCategories = ocrDetectionOptions.includedCategories
 
-        return selectedPageOCRCandidates
+        let candidates = selectedPageOCRCandidates
             .filter { includedCategories.contains($0.category) }
             .sorted { left, right in
                 if left.orderIndex != right.orderIndex {
@@ -230,6 +248,10 @@ final class AppViewModel: ObservableObject {
 
                 return candidatePositionPrecedes(left, right)
             }
+
+        visibleCandidatesCacheKey = cacheKey
+        visibleCandidatesCache = candidates
+        return candidates
     }
 
     var hasVisibleSelectedPageOCRCandidates: Bool {
@@ -560,13 +582,13 @@ final class AppViewModel: ObservableObject {
         selectedRegionID = nil
         selectedOCRCandidateID = nil
         clearPageHistory()
-        if !currentPageOCRState.isRunning {
-            currentPageOCRState = .idle
-        }
+        syncCurrentOCRStateForSelection()
 
         if let selectedFileID {
             lastSelectedPageByFileID[selectedFileID] = pageID
         }
+
+        schedulePreviewRefresh()
     }
 
     func selectRegion(_ regionID: SensitiveRegion.ID?) {
@@ -730,10 +752,6 @@ final class AppViewModel: ObservableObject {
     }
 
     func detectCurrentPageOCR() {
-        guard !currentPageOCRState.isRunning else {
-            return
-        }
-
         guard let selectedFile,
               let selectedDocumentPage,
               let selectedFileID,
@@ -742,38 +760,39 @@ final class AppViewModel: ObservableObject {
             return
         }
 
+        guard !recognizingPageIDs.contains(selectedPageID) else {
+            pageOCRStates[selectedPageID] = .running
+            currentPageOCRState = .running
+            return
+        }
+
         previewDisplayMode = .original
         let detectionOptions = ocrDetectionOptions
+        recognizingPageIDs.insert(selectedPageID)
+        pageOCRStates[selectedPageID] = .running
         currentPageOCRState = .running
 
-        Task {
+        Task.detached(priority: .userInitiated) {
+            let result: Result<[OCRSensitiveCandidate], Error>
+
             do {
-                let candidates = try await ocrService.candidates(
+                let candidates = try await DefaultOCRService().candidates(
                     for: selectedFile,
                     page: selectedDocumentPage,
                     options: detectionOptions
                 )
-                if self.selectedPageID == selectedPageID {
-                    guard ocrDetectionOptions == detectionOptions else {
-                        currentPageOCRState = .needsRerun
-                        return
-                    }
-
-                    let candidateCount = replaceOCRCandidates(
-                        candidates,
-                        fileID: selectedFileID,
-                        pageID: selectedPageID
-                    )
-                    currentPageOCRState = .succeeded(candidateCount: candidateCount)
-                } else {
-                    currentPageOCRState = .idle
-                }
+                result = .success(candidates)
             } catch {
-                if self.selectedPageID == selectedPageID {
-                    currentPageOCRState = .failed(error.localizedDescription)
-                } else {
-                    currentPageOCRState = .idle
-                }
+                result = .failure(error)
+            }
+
+            await MainActor.run {
+                self.finishCurrentPageOCR(
+                    result,
+                    fileID: selectedFileID,
+                    pageID: selectedPageID,
+                    detectionOptions: detectionOptions
+                )
             }
         }
     }
@@ -921,12 +940,150 @@ final class AppViewModel: ObservableObject {
         lastExportResult = nil
         currentPageOCRState = .idle
         ocrCandidates.removeAll()
+        recognizingPageIDs.removeAll()
+        pageOCRStates.removeAll()
         lastSelectedPageByFileID.removeAll()
         canvasZoomStates.removeAll()
         canvasScrollOffsets.removeAll()
         clearPageHistory()
         previewDisplayMode = .original
+        resetPreviewRendering()
         selectedPage = .import
+    }
+
+    private func schedulePreviewRefresh() {
+        guard let request = makePreviewRenderRequest() else {
+            resetPreviewRendering()
+            return
+        }
+
+        if renderedPreviewKey == request.contentKey {
+            return
+        }
+
+        if pendingPreviewKey == request.contentKey {
+            return
+        }
+
+        if let cachedContent = previewContentCache[request.contentKey] {
+            previewRenderTask?.cancel()
+            pendingPreviewKey = nil
+            previewContent = cachedContent
+            renderedPreviewKey = request.contentKey
+            return
+        }
+
+        previewRenderTask?.cancel()
+        pendingPreviewKey = request.contentKey
+        previewContent = .empty
+
+        let renderer = previewRenderer
+        previewRenderTask = Task(priority: .userInitiated) { [renderer, request] in
+            let renderedContent = await renderer.render(request)
+
+            await MainActor.run {
+                guard self.pendingPreviewKey == request.contentKey else {
+                    return
+                }
+
+                self.previewContentCache[request.contentKey] = renderedContent
+                self.previewContent = renderedContent
+                self.renderedPreviewKey = request.contentKey
+                self.pendingPreviewKey = nil
+                self.previewRenderTask = nil
+            }
+        }
+    }
+
+    private func resetPreviewRendering() {
+        previewRenderTask?.cancel()
+        previewRenderTask = nil
+        pendingPreviewKey = nil
+        renderedPreviewKey = nil
+        previewContent = .empty
+        previewContentCache.removeAll()
+        Task {
+            await previewRenderer.removeAllCachedContent()
+        }
+    }
+
+    private func makePreviewRenderRequest() -> PreviewRenderRequest? {
+        guard let selectedFile,
+              let selectedDocumentPage else {
+            return nil
+        }
+
+        let baseKey = PreviewBaseCacheKey(
+            fileID: selectedFile.id,
+            pageID: selectedDocumentPage.id,
+            sourceURL: selectedFile.sourceURL,
+            fileKind: selectedFile.kind,
+            sourcePageIndex: selectedDocumentPage.sourcePageIndex,
+            pageNumber: selectedDocumentPage.pageNumber
+        )
+        let contentKey = PreviewContentCacheKey(
+            baseKey: baseKey,
+            displayMode: previewDisplayMode.rawValue,
+            preset: previewDisplayMode == .maskedPreview ? selectedPreset : nil,
+            regions: previewDisplayMode == .maskedPreview ? selectedDocumentPage.sensitiveRegions : []
+        )
+
+        return PreviewRenderRequest(
+            file: selectedFile,
+            page: selectedDocumentPage,
+            displayMode: previewDisplayMode,
+            preset: selectedPreset,
+            baseKey: baseKey,
+            contentKey: contentKey
+        )
+    }
+
+    private func finishCurrentPageOCR(
+        _ result: Result<[OCRSensitiveCandidate], Error>,
+        fileID: FileItem.ID,
+        pageID: PageItem.ID,
+        detectionOptions: OCRDetectionOptions
+    ) {
+        recognizingPageIDs.remove(pageID)
+
+        guard pageLocation(fileID: fileID, pageID: pageID) != nil else {
+            pageOCRStates[pageID] = nil
+            syncCurrentOCRStateForSelection()
+            return
+        }
+
+        switch result {
+        case let .success(candidates):
+            guard ocrDetectionOptions == detectionOptions else {
+                pageOCRStates[pageID] = .needsRerun
+                syncCurrentOCRStateForSelection()
+                return
+            }
+
+            let candidateCount = replaceOCRCandidates(
+                candidates,
+                fileID: fileID,
+                pageID: pageID
+            )
+            pageOCRStates[pageID] = .succeeded(candidateCount: candidateCount)
+        case let .failure(error):
+            pageOCRStates[pageID] = .failed(error.localizedDescription)
+        }
+
+        syncCurrentOCRStateForSelection()
+    }
+
+    private func syncCurrentOCRStateForSelection() {
+        guard let selectedPageID else {
+            currentPageOCRState = .idle
+            return
+        }
+
+        if recognizingPageIDs.contains(selectedPageID) {
+            currentPageOCRState = .running
+        } else {
+            currentPageOCRState = pageOCRStates[selectedPageID] ?? .idle
+        }
     }
 
     private func applySelection(for file: FileItem, preferredPageID: PageItem.ID?) {
@@ -935,13 +1092,13 @@ final class AppViewModel: ObservableObject {
         selectedRegionID = nil
         selectedOCRCandidateID = nil
         clearPageHistory()
-        if !currentPageOCRState.isRunning {
-            currentPageOCRState = .idle
-        }
+        syncCurrentOCRStateForSelection()
 
         if let selectedPageID {
             lastSelectedPageByFileID[file.id] = selectedPageID
         }
+
+        schedulePreviewRefresh()
     }
 
     private func resolvedPageID(in file: FileItem, preferredPageID: PageItem.ID?) -> PageItem.ID? {
@@ -997,7 +1154,7 @@ final class AppViewModel: ObservableObject {
             incoming: incomingPageCandidates
         )
 
-        ocrCandidates.removeAll { $0.pageID == pageID }
+        var updatedCandidates = ocrCandidates.filter { $0.pageID != pageID }
         var replacedCount = 0
 
         for candidate in pageCandidates {
@@ -1007,9 +1164,11 @@ final class AppViewModel: ObservableObject {
 
             var newCandidate = candidate
             newCandidate.orderIndex = replacedCount
-            ocrCandidates.append(newCandidate)
+            updatedCandidates.append(newCandidate)
             replacedCount += 1
         }
+
+        ocrCandidates = updatedCandidates
 
         if let selectedOCRCandidateID,
            !ocrCandidates.contains(where: { $0.id == selectedOCRCandidateID }) {
@@ -1314,7 +1473,10 @@ final class AppViewModel: ObservableObject {
     private func handleOCRDisplayOptionsChanged() {
         clearHiddenOCRCandidateSelection()
 
-        if !currentPageOCRState.isRunning, selectedDocumentPage != nil {
+        if let selectedPageID,
+           selectedDocumentPage != nil,
+           !recognizingPageIDs.contains(selectedPageID) {
+            pageOCRStates[selectedPageID] = .needsRerun
             currentPageOCRState = .needsRerun
         }
     }
@@ -1465,6 +1627,72 @@ final class AppViewModel: ObservableObject {
 private struct PageEditSnapshot {
     let regions: [SensitiveRegion]
     let selectedRegionID: SensitiveRegion.ID?
+}
+
+private actor PreviewRenderer {
+    private let pdfRenderService = DefaultPDFRenderService()
+    private let maskComposeService = DefaultMaskComposeService()
+    private var contentCache: [PreviewContentCacheKey: DocumentPreviewContent] = [:]
+
+    func render(_ request: PreviewRenderRequest) -> DocumentPreviewContent {
+        if let cachedContent = contentCache[request.contentKey] {
+            return cachedContent
+        }
+
+        let baseContent = pdfRenderService.previewContent(for: request.file, page: request.page)
+        let resolvedContent: DocumentPreviewContent
+
+        if request.displayMode == .maskedPreview,
+           case let .raster(rasterContent) = baseContent {
+            resolvedContent = .raster(
+                maskComposeService.maskedPreview(
+                    from: rasterContent,
+                    regions: request.page.sensitiveRegions,
+                    preset: request.preset
+                )
+            )
+        } else {
+            resolvedContent = baseContent
+        }
+
+        contentCache[request.contentKey] = resolvedContent
+        return resolvedContent
+    }
+
+    func removeAllCachedContent() {
+        contentCache.removeAll()
+    }
+}
+
+nonisolated private struct PreviewRenderRequest {
+    let file: FileItem
+    let page: PageItem
+    let displayMode: ReviewPreviewMode
+    let preset: MaskPreset
+    let baseKey: PreviewBaseCacheKey
+    let contentKey: PreviewContentCacheKey
+}
+
+nonisolated private struct PreviewBaseCacheKey: Hashable {
+    let fileID: FileItem.ID
+    let pageID: PageItem.ID
+    let sourceURL: URL?
+    let fileKind: FileKind
+    let sourcePageIndex: Int?
+    let pageNumber: Int
+}
+
+nonisolated private struct PreviewContentCacheKey: Hashable {
+    let baseKey: PreviewBaseCacheKey
+    let displayMode: String
+    let preset: MaskPreset?
+    let regions: [SensitiveRegion]
+}
+
+nonisolated private struct VisibleCandidateCacheKey: Hashable {
+    let pageID: PageItem.ID?
+    let includedCategories: Set<OCRCandidateCategory>
+    let revision: Int
 }
 
 enum CurrentPageOCRState: Equatable {

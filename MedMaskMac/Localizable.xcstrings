@@ -1,12 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "-" : {
-
-    },
-    "+" : {
-
-    },
     "app.page_picker_label" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1197,23 +1191,6 @@
         }
       }
     },
-    "ocr.category.birthday" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Birthday"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "生日"
-          }
-        }
-      }
-    },
     "ocr.category.bed_number" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1227,6 +1204,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "床号"
+          }
+        }
+      }
+    },
+    "ocr.category.birthday" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Birthday"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "生日"
           }
         }
       }
@@ -1282,23 +1276,6 @@
         }
       }
     },
-    "ocr.category.exam_date" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Exam Date"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "检查日期"
-          }
-        }
-      }
-    },
     "ocr.category.department" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1333,23 +1310,6 @@
         }
       }
     },
-    "ocr.category.staff_signature" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Staff / Signature"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "工作人员/签名"
-          }
-        }
-      }
-    },
     "ocr.category.document_number" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1380,6 +1340,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "电子邮件"
+          }
+        }
+      }
+    },
+    "ocr.category.exam_date" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exam Date"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查日期"
           }
         }
       }
@@ -1486,6 +1463,23 @@
         }
       }
     },
+    "ocr.category.staff_signature" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Staff / Signature"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工作人员/签名"
+          }
+        }
+      }
+    },
     "ocr.category.unknown" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1554,40 +1548,6 @@
         }
       }
     },
-    "preset.custom.summary" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Uses the enabled checklist fields for OCR suggestions."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "根据勾选字段生成 OCR 建议。"
-          }
-        }
-      }
-    },
-    "preset.custom.title" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Custom Redaction"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自定义脱敏"
-          }
-        }
-      }
-    },
     "preset.custom.field.address" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1652,23 +1612,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "医生"
-          }
-        }
-      }
-    },
-    "preset.custom.field.staff_signature" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Staff / Signature"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "工作人员/签名"
           }
         }
       }
@@ -1788,6 +1731,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "性别"
+          }
+        }
+      }
+    },
+    "preset.custom.field.staff_signature" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Staff / Signature"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工作人员/签名"
+          }
+        }
+      }
+    },
+    "preset.custom.summary" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uses the enabled checklist fields for OCR suggestions."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "根据勾选字段生成 OCR 建议。"
+          }
+        }
+      }
+    },
+    "preset.custom.title" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom Redaction"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义脱敏"
           }
         }
       }
@@ -2268,6 +2262,23 @@
         }
       }
     },
+    "review.inspector.custom_preset_fields" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom Fields"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义字段"
+          }
+        }
+      }
+    },
     "review.inspector.detection_subtitle" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2298,23 +2309,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "检测状态"
-          }
-        }
-      }
-    },
-    "review.inspector.custom_preset_fields" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Custom Fields"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自定义字段"
           }
         }
       }
@@ -2523,74 +2517,6 @@
         }
       }
     },
-    "review.ocr.value.region_only" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Text was not recognized reliably. Please review the masking area."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未能可靠识别文字，请复核遮盖范围"
-          }
-        }
-      }
-    },
-    "review.ocr.value.unreadable_content" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Text was not recognized reliably. Please review the masking area."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未能可靠识别文字，请复核遮盖范围"
-          }
-        }
-      }
-    },
-    "review.ocr.value.empty_field" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No filled content detected."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未检测到填写内容"
-          }
-        }
-      }
-    },
-    "review.ocr.value.uncertain" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Possible: %@. Please review."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可能：%@，请复核"
-          }
-        }
-      }
-    },
     "review.ocr.state.failed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2625,23 +2551,6 @@
         }
       }
     },
-    "review.ocr.state.no_page" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Select a file and page first."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请先选择文件和页面。"
-          }
-        }
-      }
-    },
     "review.ocr.state.needs_rerun" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2655,6 +2564,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "检测设置已变更，请重新识别当前页。"
+          }
+        }
+      }
+    },
+    "review.ocr.state.no_page" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select a file and page first."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先选择文件和页面。"
           }
         }
       }
@@ -2757,6 +2683,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "OCR 建议框是所选页面上的普通可编辑框。"
+          }
+        }
+      }
+    },
+    "review.ocr.value.empty_field" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No filled content detected."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未检测到填写内容"
+          }
+        }
+      }
+    },
+    "review.ocr.value.region_only" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text was not recognized reliably. Please review the masking area."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能可靠识别文字，请复核遮盖范围"
+          }
+        }
+      }
+    },
+    "review.ocr.value.uncertain" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Possible: %@. Please review."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可能：%@，请复核"
+          }
+        }
+      }
+    },
+    "review.ocr.value.unreadable_content" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text was not recognized reliably. Please review the masking area."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能可靠识别文字，请复核遮盖范围"
           }
         }
       }

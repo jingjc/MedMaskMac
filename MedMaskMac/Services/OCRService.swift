@@ -6,7 +6,7 @@ import PDFKit
 import UniformTypeIdentifiers
 import Vision
 
-protocol OCRService {
+nonisolated protocol OCRService {
     var availabilitySummary: String { get }
 
     func candidates(
@@ -99,7 +99,7 @@ struct PrivateOCRRegressionFixtureResult {
 }
 #endif
 
-struct DefaultOCRService: OCRService {
+nonisolated struct DefaultOCRService: OCRService {
     let availabilitySummary = L10n.Services.ocrSummary
 
     func candidates(
