@@ -1,5 +1,35 @@
 # MedMaskMac
 
+MedMaskMac is an early-stage, local-first macOS app for redacting sensitive information from Chinese medical documents before users share them with AI tools or other people.
+
+The project focuses on privacy-sensitive fields commonly found in Chinese medical reports, including names, phone numbers, ID numbers, medical record numbers, inpatient numbers, addresses, dates, and similar information.
+
+MedMaskMac is designed to reduce manual redaction work and help users review sensitive regions locally before exporting or sharing documents.
+
+## Current Status
+
+MedMaskMac is currently in early alpha. It is not yet a production-ready or fully automated privacy guarantee. OCR and automatic redaction can make mistakes, so users should manually review all redactions before sharing exported files.
+
+## Key Features
+
+- Import PDF, PNG, JPG, and JPEG files
+- OCR-based sensitive information detection
+- Standard and strict redaction modes
+- Review and edit detected redaction candidates
+- Preview original and redacted documents
+- Export redacted documents
+- Private local regression workflow for OCR testing
+
+## Privacy
+
+MedMaskMac is designed as a local-first tool. Documents are intended to be processed locally on the user's Mac by default.
+
+Do not submit real personal, medical, financial, or identity documents in GitHub issues, pull requests, screenshots, or test fixtures. Use only synthetic or fully redacted samples.
+
+---
+
+## 中文说明
+
 ## 项目简介
 
 MedMaskMac 是一个本地优先的 macOS 工具，用于在医疗 PDF 或图片文档对外分享前，辅助用户识别并遮盖可能包含敏感信息的区域。
